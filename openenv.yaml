@@ -1,0 +1,68 @@
+name: ml-experiment-debugger
+version: "2.0.0"
+description: >
+  An RL environment where agents diagnose broken ML training runs through
+  multi-step tool use. The agent calls investigation tools (request_logs,
+  inspect_config, run_diagnostic, request_data_audit) to gather evidence,
+  then submits a final diagnosis and fix via submit_fix.
+  3 tasks: overfitting (easy), LR explosion (medium), silent data poisoning (hard).
+author: AIverse
+difficulty_levels: [easy, medium, hard]
+
+action_space:
+  type: structured
+  description: >
+    Each action is either a tool call (investigation) or submit_fix (terminal per task).
+  tools:
+    - name: request_logs
+      params: [start_epoch, end_epoch]
+    - name: plot_metric
+      params: [metric_name]
+      note: returns min/max/mean/trend summary; available metrics depend on task
+    - name: inspect_config
+      params: [config_key]
+    - name: run_diagnostic
+      params: [diagnostic_type]
+      diagnostic_types: [overfitting_check, gradient_stats, loss_trend, class_balance]
+    - name: request_data_audit
+      params: [class_id]
+    - name: submit_fix
+      params: [diagnosis, fix_type, fix_detail, confidence]
+      terminal: true
+
+observation_space:
+  type: structured
+  fields:
+    - task_id
+    - difficulty
+    - description
+    - step_number
+    - max_steps
+    - steps_remaining
+    - tool_result
+    - action_history
+    - available_tools
+    - hint
+
+reward:
+  tool_call_relevant:  +0.01 to +0.03 (intermediate signal based on relevance to actual bug)
+  tool_call_redundant: -0.01 (RL penalty for repeating identical calls / undesirable behavior)
+  submit_fix: fix_quality (0.0–1.0) + efficiency_bonus (0.0–0.05)
+  trajectory_bonus: +0.05 on hard task if easy>0.7 and medium>0.6
+  cumulative_episode_signal: tracked per task; exposed in Reward model for RL training
+
+tasks:
+  - id: overfitting
+    difficulty: easy
+    score_range: [0.0, 1.0]
+    max_steps: 15
+  - id: lr_explosion
+    difficulty: medium
+    score_range: [0.0, 1.0]
+    max_steps: 15
+  - id: data_poisoning
+    difficulty: hard
+    score_range: [0.0, 1.0]
+    max_steps: 15
+
+tags: [ml-engineering, debugging, real-world, production, multi-step, tool-use]
