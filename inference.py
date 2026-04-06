@@ -1,135 +1,147 @@
-"""
-ML Debug Environment — Multi-step Inference Script
-Agent iteratively calls fetch_* actions to gather evidence,
-then calls diagnose to complete each task.
-"""
 import os
 import json
+import asyncio
+import textwrap
+from typing import List, Optional
 from openai import OpenAI
+
+# Your environment imports (adjust based on your actual file structure)
 from env.environment import MLDebugEnv
 from env.models import Action
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-HF_TOKEN     = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
-MODEL_NAME   = os.getenv("MODEL_NAME", "meta-llama/Llama-3.3-70B-Instruct")
+# Mandatory Hackathon Variables
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "meta-llama/Llama-3.3-70B-Instruct"
 
-client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+TASK_NAME = os.getenv("MY_ENV_TASK", "ml-debugging")
+BENCHMARK = os.getenv("MY_ENV_BENCHMARK", "openenv-ml-debug")
+MAX_STEPS = 5
 
-SYSTEM = """\
-You are an expert ML engineer. A model is underperforming — investigate why and prescribe a fix.
+SYSTEM_PROMPT = textwrap.dedent(
+    """
+    You are an expert AI Engineer debugging a broken ML training pipeline.
+    You must investigate the issue using fetch_* actions, then submit a diagnosis.
+    
+    Investigation Actions (Gather evidence):
+      {"action_type": "fetch_logs", "epochs": "all"}
+      {"action_type": "fetch_config", "keys": ["lr", "optimizer"]}
+      {"action_type": "fetch_loss_curve", "split": "val"}
+      {"action_type": "fetch_diagnostics", "check": "overfitting"}
+      {"action_type": "fetch_class_data", "class_id": 0}
 
-## Available actions (respond with strict JSON, no markdown)
-
-Investigation (call these first to gather evidence):
-  {"action_type": "fetch_logs",        "epochs": "1-10"}
-  {"action_type": "fetch_logs",        "epochs": "15-20"}
-  {"action_type": "fetch_config",      "keys": ["lr", "optimizer"]}
-  {"action_type": "fetch_loss_curve",  "split": "val"}
-  {"action_type": "fetch_loss_curve",  "split": "train"}
-  {"action_type": "fetch_diagnostics", "check": "overfitting"}
-  {"action_type": "fetch_diagnostics", "check": "gradients"}
-  {"action_type": "fetch_diagnostics", "check": "class_balance"}
-  {"action_type": "fetch_class_data",  "class_id": 2}
-
-Terminal (call this when confident — ends current task):
-  {
-    "action_type": "diagnose",
-    "diagnosis":   "Root cause explanation",
-    "fix_type":    "config_change | data_fix | architecture_change",
-    "fix_detail":  "Specific actionable fix with concrete values",
-    "confidence":  0.0-1.0
-  }
-
-Strategy: use 3–6 fetch_* calls to build evidence, then diagnose.
-Do NOT repeat the same call twice (penalty applied).
-"""
-
-
-def _format_obs(obs, action_result: str | None = None) -> str:
-    parts = [
-        f"## Task: {obs.task_id}  (difficulty: {obs.difficulty})",
-        obs.description,
-        f"Steps remaining: {obs.steps_remaining}/{obs.max_steps}",
-    ]
-    if obs.action_history:
-        parts.append(f"Actions so far: {', '.join(obs.action_history)}")
-    if action_result:
-        parts.append(f"\n## Last action result:\n{action_result}")
-    if obs.hint:
-        parts.append(f"\n💡 Hint: {obs.hint}")
-    parts.append("\nRespond with a single JSON action.")
-    return "\n".join(parts)
+    Terminal Action (Ends the episode):
+      {
+        "action_type": "diagnose",
+        "diagnosis": "Root cause explanation",
+        "fix_type": "config_change",
+        "fix_detail": "Specific fix values",
+        "confidence": 0.9
+      }
+      
+    Respond ONLY with a valid JSON object matching one of the actions above. No markdown.
+    """
+).strip()
 
 
-def _parse_action(raw: str) -> Action:
-    raw = raw.strip().replace("```json", "").replace("```", "").strip()
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    # Collapse JSON into a single line for the logger
+    action_single_line = action.replace('\n', '').replace('\r', '').replace('  ', '')
+    print(f"[STEP] step={step} action={action_single_line} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+
+def build_user_prompt(step: int, obs_description: str, action_history: List[str]) -> str:
+    history_str = "\n".join(action_history) if action_history else "None"
+    return textwrap.dedent(
+        f"""
+        Step: {step}
+        Observation: {obs_description}
+        Previous Actions:
+        {history_str}
+        
+        Provide your next action as a strict JSON object.
+        """
+    ).strip()
+
+def get_llm_action(client: OpenAI, step: int, obs_description: str, history: List[str]) -> Action:
+    user_prompt = build_user_prompt(step, obs_description, history)
     try:
-        parsed = json.loads(raw)
-        return Action(**parsed)
-    except Exception:
-        return Action(
-            action_type="diagnose",
-            diagnosis="Unable to parse LLM response",
-            fix_type="config_change",
-            fix_detail="N/A",
-            confidence=0.0,
+        completion = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.1,
+            max_tokens=200,
         )
+        raw_text = (completion.choices[0].message.content or "").strip()
+        # Clean up markdown if the LLM ignores instructions
+        raw_text = raw_text.replace("```json", "").replace("```", "").strip()
+        
+        parsed_json = json.loads(raw_text)
+        return Action(**parsed_json), raw_text
+        
+    except Exception as exc:
+        # Fallback action to prevent script crash if LLM hallucinates format
+        fallback = Action(action_type="fetch_logs", epochs="all")
+        return fallback, f'{{"action_type": "fetch_logs", "error": "{str(exc)}"}}'
 
 
-def run_inference():
-    env = MLDebugEnv(max_steps_per_task=15)
-    obs = env.reset()
-    results = []
-    done = False
+def main() -> None:
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    env = MLDebugEnv(max_steps_per_task=MAX_STEPS)
 
-    while not done:
-        messages = [{"role": "system", "content": SYSTEM}]
-        action_result = None
-        task_done = False
+    log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
 
-        while not task_done:
-            messages.append({"role": "user", "content": _format_obs(obs, action_result)})
+    # We will test all 3 difficulties (Easy, Medium, Hard)
+    total_score = 0.0
+    
+    for task_idx in range(3):
+        obs = env.reset() # OpenEnv standard reset
+        
+        history: List[str] = []
+        rewards: List[float] = []
+        steps_taken = 0
+        task_score = 0.0
+        success = False
+        error_msg = None
 
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=messages,
-                temperature=0.1,
-                max_tokens=512,
-            )
-            assistant_text = response.choices[0].message.content.strip()
-            messages.append({"role": "assistant", "content": assistant_text})
+        for step in range(1, MAX_STEPS + 1):
+            action_obj, raw_action_str = get_llm_action(client, step, obs.description, history)
+            
+            try:
+                # OpenEnv standard step
+                obs, reward_obj, done, info = env.step(action_obj)
+                reward_val = reward_obj.score if hasattr(reward_obj, 'score') else float(reward_obj)
+            except Exception as e:
+                reward_val = 0.0
+                done = True
+                error_msg = str(e)
+            
+            rewards.append(reward_val)
+            steps_taken = step
+            history.append(f"Step {step}: {raw_action_str}")
+            
+            log_step(step=step, action=raw_action_str, reward=reward_val, done=done, error=error_msg)
+            
+            if done:
+                task_score = reward_val 
+                break
 
-            action = _parse_action(assistant_text)
-            obs, reward, done, info = env.step(action)
-
-            if action.action_type == "diagnose" or info.get("timeout"):
-                task_done = True
-                results.append({
-                    "task_id":        info["task_id"],
-                    "difficulty":     info["difficulty"],
-                    "fix_quality":    reward.fix_quality,
-                    "efficiency_bonus": reward.efficiency_bonus,
-                    "final_score":    reward.score,
-                    "steps_used":     reward.steps_used,
-                    "reasoning":      reward.reasoning,
-                })
-                print(
-                    f"[{info['task_id']}] "
-                    f"quality={reward.fix_quality:.3f} "
-                    f"+bonus={reward.efficiency_bonus:.3f} "
-                    f"→ {reward.score:.3f}  "
-                    f"[{reward.steps_used} steps] | {reward.reasoning}"
-                )
-            else:
-                action_result = info.get("action_result", "")
-
-    print("\n=== FINAL SCORES ===")
-    for r in results:
-        print(f"  {r['task_id']} ({r['difficulty']}): {r['final_score']:.3f}  [{r['steps_used']} steps]")
-    avg = sum(r["final_score"] for r in results) / len(results)
-    print(f"  AVERAGE: {avg:.3f}")
-    return results
-
+        # Assuming a score > 0.5 is a "success" based on your grading criteria
+        success = task_score >= 0.5
+        total_score += task_score
+        
+        log_end(success=success, steps=steps_taken, score=task_score, rewards=rewards)
 
 if __name__ == "__main__":
-    run_inference()
+    main()
