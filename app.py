@@ -14,7 +14,7 @@ app = FastAPI(
         "3 tasks: overfitting (easy), LR explosion (medium), silent data poisoning (hard). "
         "Includes RL agent that learns optimal debugging strategies."
     ),
-    version="4.0.0",
+    version="4.1.0",
 )
 
 app.add_middleware(
@@ -25,7 +25,7 @@ app.add_middleware(
 )
 
 env = MLDebugEnv(max_steps_per_task=15)
-rl_agent = DQNAgent(learning_rate=0.01, epsilon=0.15, gamma=0.99)
+rl_agent = DQNAgent(learning_rate=0.15, epsilon=0.15, gamma=0.95)
 
 # Load pre-trained agent if available
 AGENT_CHECKPOINT = "agent_checkpoint.pkl"
@@ -57,10 +57,10 @@ def step(action: Action) -> Dict[str, Any]:
         
         # Learn from episode if terminal action
         if action.action_type == "diagnose":
-            task_difficulty = obs.task_difficulty if hasattr(obs, 'task_difficulty') else "easy"
+            task_difficulty = info.get("difficulty", "easy")
             rl_agent.learn_from_episode(
                 task_difficulty=task_difficulty,
-                actions_used=env._action_history,
+                actions_used=info.get("actions_used", []),
                 final_reward=reward.score
             )
             # Save learned strategies periodically
@@ -104,12 +104,17 @@ def recommend_actions(limit: int = 5) -> Dict[str, Any]:
     task_difficulty = env._current_task.difficulty
     steps_remaining = env.max_steps_per_task - env._task_step
     
-    recommended = rl_agent.get_recommended_actions(task_difficulty, steps_remaining)
+    current_obs = env._make_observation().model_dump()
+    recommended = rl_agent.get_recommended_actions(
+        observation=current_obs,
+        task_difficulty=task_difficulty,
+        limit=limit,
+    )
     
     return {
         "task_difficulty": task_difficulty,
         "steps_remaining": steps_remaining,
-        "recommended_actions": recommended[:limit],
+        "recommended_actions": recommended,
         "reasoning": f"Based on patterns learned from {len(rl_agent.training_history)} debugging episodes"
     }
 

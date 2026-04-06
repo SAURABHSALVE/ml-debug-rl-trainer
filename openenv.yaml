@@ -1,32 +1,30 @@
 name: ml-experiment-debugger
-version: "2.0.0"
+version: "4.1.0"
 description: >
-  An RL environment where agents diagnose broken ML training runs through
-  multi-step tool use. The agent calls investigation tools (request_logs,
-  inspect_config, run_diagnostic, request_data_audit) to gather evidence,
-  then submits a final diagnosis and fix via submit_fix.
-  3 tasks: overfitting (easy), LR explosion (medium), silent data poisoning (hard).
+  A real-world RL environment where agents debug broken ML training runs by
+  gathering targeted evidence and then submitting a diagnosis and fix.
+  Tasks progress from overfitting to learning-rate instability to silent
+  data poisoning.
 author: AIverse
 difficulty_levels: [easy, medium, hard]
 
 action_space:
   type: structured
   description: >
-    Each action is either a tool call (investigation) or submit_fix (terminal per task).
+    Each action is either an investigation tool call or a terminal diagnose
+    action that ends the current task and receives a graded score.
   tools:
-    - name: request_logs
-      params: [start_epoch, end_epoch]
-    - name: plot_metric
-      params: [metric_name]
-      note: returns min/max/mean/trend summary; available metrics depend on task
-    - name: inspect_config
-      params: [config_key]
-    - name: run_diagnostic
-      params: [diagnostic_type]
-      diagnostic_types: [overfitting_check, gradient_stats, loss_trend, class_balance]
-    - name: request_data_audit
+    - name: fetch_logs
+      params: [epochs]
+    - name: fetch_config
+      params: [keys]
+    - name: fetch_loss_curve
+      params: [split]
+    - name: fetch_diagnostics
+      params: [check]
+    - name: fetch_class_data
       params: [class_id]
-    - name: submit_fix
+    - name: diagnose
       params: [diagnosis, fix_type, fix_detail, confidence]
       terminal: true
 
@@ -39,17 +37,24 @@ observation_space:
     - step_number
     - max_steps
     - steps_remaining
-    - tool_result
+    - action_result
     - action_history
-    - available_tools
+    - available_actions
     - hint
+    - training_logs
+    - config_yaml
+    - loss_curve
+    - gpu_metrics
 
 reward:
-  tool_call_relevant:  +0.01 to +0.03 (intermediate signal based on relevance to actual bug)
-  tool_call_redundant: -0.01 (RL penalty for repeating identical calls / undesirable behavior)
-  submit_fix: fix_quality (0.0–1.0) + efficiency_bonus (0.0–0.05)
+  investigation_signal: -0.01 to +0.03
+  diagnose_score: 0.0 to 1.0
+  efficiency_bonus: 0.0 to 0.05
   trajectory_bonus: +0.05 on hard task if easy>0.7 and medium>0.6
-  cumulative_episode_signal: tracked per task; exposed in Reward model for RL training
+  notes:
+    - Investigation actions earn small positive rewards when they expose evidence relevant to the hidden bug.
+    - Redundant identical tool calls receive a -0.01 penalty.
+    - Diagnose actions receive deterministic partial credit from task-specific graders.
 
 tasks:
   - id: overfitting
@@ -65,4 +70,11 @@ tasks:
     score_range: [0.0, 1.0]
     max_steps: 15
 
-tags: [ml-engineering, debugging, real-world, production, multi-step, tool-use]
+api:
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
+  tasks: GET /tasks
+  health: GET /health
+
+tags: [ml-engineering, debugging, reinforcement-learning, tool-use, openenv]

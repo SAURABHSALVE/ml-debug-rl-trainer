@@ -233,8 +233,8 @@ export default function App() {
             {/* AI Advisor */}
             <AIAdvisor 
               taskDifficulty={difficultyOf}
-              stepsUsed={info?.steps_used || 0}
-              stepsRemaining={15 - (info?.steps_used || 0)}
+              stepsUsed={reward?.steps_used || 0}
+              stepsRemaining={15 - (reward?.steps_used || 0)}
               onActionSelected={handleActionSelected}
             />
 
