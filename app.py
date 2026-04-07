@@ -1,26 +1,35 @@
 """
-ML Experiment Debugger — OpenEnv Server
-Clean FastAPI app exposing ONLY the OpenEnv-required endpoints.
-No agent logic here. Agent lives in inference.py.
+FastAPI app with comprehensive error handling and validation.
 """
 
-from fastapi import FastAPI, HTTPException
+import logging
+from datetime import datetime
+from typing import Any, Dict
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Any, Dict, List
+from fastapi.responses import JSONResponse
 
 from env.environment import MLDebugEnv
 from env.models import Action, Observation, Reward
 
+# ─── Logging ───────────────────────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("ml_debug.log"),
+        logging.StreamHandler(),
+    ]
+)
+
+# ─── FastAPI App ───────────────────────────────────────────────────────────
+
 app = FastAPI(
     title="ML Experiment Debugger — OpenEnv",
-    description=(
-        "Multi-step RL environment where agents diagnose broken ML training runs. "
-        "Agent calls investigation tools (fetch_logs, fetch_config, fetch_loss_curve, "
-        "fetch_gpu_metrics, fetch_class_metrics) to gather evidence step by step, "
-        "then calls diagnose to submit the fix. "
-        "3 tasks: overfitting (easy), LR explosion (medium), silent data poisoning (hard). "
-        "Each investigation costs one step from a limited budget — wrong choices waste budget."
-    ),
+    description="Multi-step RL environment for diagnosing broken ML training runs.",
     version="1.0.0",
 )
 
@@ -31,66 +40,165 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# One environment instance per server
+# Global environment instance
 env = MLDebugEnv()
 
 
-# ─── Required OpenEnv Endpoints ────────────────────────────────────────────────
+# ─── Error Handlers ────────────────────────────────────────────────────────
 
-@app.post("/reset", response_model=Observation, summary="Reset episode — returns Task 1 observation")
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    logger.error(f"ValueError: {exc}")
+    return JSONResponse(
+        status_code=400,
+        content={"error": "Invalid input", "detail": str(exc)},
+    )
+
+
+@app.exception_handler(TimeoutError)
+async def timeout_error_handler(request: Request, exc: TimeoutError):
+    logger.error(f"TimeoutError: {exc}")
+    return JSONResponse(
+        status_code=504,
+        content={"error": "Request timeout", "detail": "LLM grading took too long"},
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unexpected error: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": "See server logs"},
+    )
+
+
+# ─── Endpoints ─────────────────────────────────────────────────────────────
+
+@app.post("/reset", response_model=Observation, summary="Reset episode")
 def reset() -> Observation:
-    """
-    Start a new episode. Returns the first task (easy) observation.
-    Agent receives ONLY the task description — no data yet.
-    Agent must call investigation tools to reveal data.
-    """
-    return env.reset()
+    """Start a new episode with randomly selected tasks."""
+    try:
+        logger.info(f"Episode reset requested")
+        obs = env.reset()
+        logger.info(f"Episode started with tasks: {env.list_tasks()}")
+        return obs
+    except Exception as e:
+        logger.error(f"Reset failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reset: {str(e)}")
 
 
-@app.post("/step", summary="Submit one action — investigation tool call or diagnose")
+@app.post("/step", summary="Submit investigation tool call or diagnose")
 def step(action: Action) -> Dict[str, Any]:
     """
-    Submit one action.
-
-    **Investigation actions** (non-terminal, reveal data, cost one step):
-    - `{"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 10}`
-    - `{"action_type": "fetch_config", "keys": ["lr", "optimizer"]}`
-    - `{"action_type": "fetch_loss_curve", "split": "val"}`
-    - `{"action_type": "fetch_gpu_metrics"}`
-    - `{"action_type": "fetch_class_metrics", "class_id": 2}`
-
-    **Terminal action** (ends current task, graded 0.0–1.0):
-    - `{"action_type": "diagnose", "diagnosis": "...", "fix_type": "config_change", "fix_detail": "...", "confidence": 0.9}`
-
-    fix_type must be one of: config_change | data_fix | architecture_change
+    Submit one action (investigation tool or diagnose).
+    
+    **Investigation tools** (cost 1 step each):
+    - fetch_logs: Retrieve training logs
+    - fetch_config: Retrieve hyperparameter config
+    - fetch_loss_curve: Retrieve train/val loss curves
+    - fetch_gpu_metrics: Retrieve GPU/memory metrics
+    - fetch_class_metrics: Retrieve per-class accuracy metrics
+    
+    **Terminal action**:
+    - diagnose: Submit diagnosis and fix (ends current task, grades 0.0-1.0)
     """
     try:
+        # ✅ Validate preconditions
+        if env._current_task is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No active task. Call POST /reset to start an episode."
+            )
+        
+        # ✅ Validate action
+        valid_actions = [
+            "fetch_logs", "fetch_config", "fetch_loss_curve",
+            "fetch_gpu_metrics", "fetch_class_metrics", "diagnose"
+        ]
+        if action.action_type not in valid_actions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown action: {action.action_type}. Valid: {valid_actions}"
+            )
+        
+        # ✅ Log action
+        task_id = env._current_task["task_id"]
+        logger.info(
+            f"Task {task_id} step {env._task_step}: action={action.action_type}"
+        )
+        
+        # ✅ Execute step
         obs, reward, done, info = env.step(action)
+        
+        # ✅ Log result
+        if action.action_type == "diagnose":
+            logger.info(
+                f"Task {task_id} graded: score={reward.total}, feedback={reward.feedback[:80]}"
+            )
+        
         return {
             "observation": obs.model_dump(),
             "reward": reward.model_dump(),
             "done": done,
             "info": info,
         }
+    
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+    except TimeoutError as e:
+        logger.error(f"Timeout during step: {e}")
+        raise HTTPException(status_code=504, detail="LLM grading timeout")
     except RuntimeError as e:
+        logger.error(f"Runtime error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error in /step: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/state", summary="Get current episode state")
 def state() -> Dict[str, Any]:
-    """
-    Returns current episode state including task index, steps used,
-    tools called so far, and scores on completed tasks.
-    """
-    return env.state()
+    """Returns current episode state (task index, steps, tools called, scores)."""
+    try:
+        return env.state()
+    except Exception as e:
+        logger.error(f"Error getting state: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get state")
 
 
-@app.get("/tasks", summary="List all 3 tasks in the current episode")
-def list_tasks() -> List[Dict[str, Any]]:
-    """Lists task IDs, difficulties, and descriptions for current episode."""
-    return env.list_tasks()
+@app.get("/tasks", summary="List all 3 tasks in current episode")
+def list_tasks() -> Dict[str, Any]:
+    """Returns task IDs, difficulties, and descriptions."""
+    try:
+        tasks = env.list_tasks()
+        return {
+            "episode_active": env._current_task is not None,
+            "task_index": env._task_index,
+            "tasks": tasks,
+        }
+    except Exception as e:
+        logger.error(f"Error listing tasks: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list tasks")
 
 
 @app.get("/health", summary="Health check")
 def health() -> Dict[str, str]:
-    return {"status": "ok"}
+    """Service health check."""
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0",
+    }
+
+
+# ─── Startup/Shutdown ───────────────────────────────────────────────────────
+
+@app.on_event("startup")
+def startup():
+    logger.info("ML Experiment Debugger starting up")
+
+
+@app.on_event("shutdown")
+def shutdown():
+    logger.info("ML Experiment Debugger shutting down")

@@ -15,8 +15,11 @@ Key design:
   - Agent must call diagnose within budget or task scores 0
 """
 
+import logging
 import random
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 from env.graders import grade
 from env.models import Action, Observation, Reward
@@ -99,6 +102,12 @@ class MLDebugEnv:
         ]
         self._task_index = 0
         self._scores = {}
+        
+        logger.info(
+            f"Episode reset: easy={self._tasks[0]['task_id']}, "
+            f"medium={self._tasks[1]['task_id']}, hard={self._tasks[2]['task_id']}"
+        )
+        
         return self._load_task(self._tasks[0])
 
     def _load_task(self, task: Dict[str, Any]) -> Observation:
@@ -132,18 +141,19 @@ class MLDebugEnv:
         difficulty = task["difficulty"]
         max_steps = self._max_steps_map[difficulty]
 
-        # Out of budget — auto-fail
-        if self._task_step >= max_steps and action.action_type != "diagnose":
+        # ✅ FIX: Increment FIRST
+        self._task_step += 1
+
+        # ✅ Then check against limit
+        if self._task_step > max_steps and action.action_type != "diagnose":
             reward = Reward(
                 score=0.0,
                 breakdown={},
-                feedback="Budget exhausted without diagnosis. Score = 0.",
+                feedback=f"Budget exhausted after {max_steps} steps. Score = 0.",
                 total=0.0,
             )
             done, info, next_obs = self._advance_or_end(reward, difficulty, task)
             return next_obs, reward, done, info
-
-        self._task_step += 1
 
         # ── Investigation action ──────────────────────────────────────────────
         if action.action_type != "diagnose":
@@ -195,6 +205,16 @@ class MLDebugEnv:
 
         self._action_history.append("diagnose")
         self._scores[difficulty] = total
+        
+        if action.action_type == "diagnose":
+            diagnosis_preview = (action.diagnosis or "None")[:60]
+            logger.info(
+                f"Task {task['task_id']} diagnosed: "
+                f"score={total:.2f}, "
+                f"diagnosis='{diagnosis_preview}...', "
+                f"fix_type={action.fix_type}"
+            )
+            
         done, info, next_obs = self._advance_or_end(reward, difficulty, task)
 
         return next_obs, reward, done, info
@@ -207,18 +227,24 @@ class MLDebugEnv:
         bug_type = task.get("ground_truth", {}).get("bug_type", "")
         relevant = RELEVANT_TOOLS_BY_BUG.get(bug_type) or RELEVANT_TOOLS.get(task["difficulty"], set())
 
-        # Penalty for repeating same tool
+        # ✅ FIX 1: Check repeat BEFORE appending
         if tool in self._called_tools:
-            self._called_tools.append(tool)
-            return {"result": "Already called this tool. No new information."}, -0.01
+            # Don't append again — return immediately
+            return {"result": "Already called this tool. No new information."}, -0.05
 
+        # ✅ FIX 2: Append only on success
         self._called_tools.append(tool)
-        intermediate_reward = 0.02 if tool in relevant else 0.0
+        
+        # ✅ Better penalty (0.05 vs 0.02 positive) means agent thinks twice
+        intermediate_reward = 0.05 if tool in relevant else 0.0
 
         if tool == "fetch_logs":
-            start = action.start_epoch or 1
-            end = action.end_epoch or len(data["logs"])
-            result = data["logs"][max(0, start - 1): min(len(data["logs"]), end)]
+            # Validate inputs
+            start = max(1, action.start_epoch or 1)
+            end = min(len(data["logs"]), action.end_epoch or len(data["logs"]))
+            if start > end:
+                start, end = end, start
+            result = data["logs"][start - 1 : end]
             return {"logs": result}, intermediate_reward
 
         elif tool == "fetch_config":
@@ -227,13 +253,22 @@ class MLDebugEnv:
             return {"config": result}, intermediate_reward
 
         elif tool == "fetch_loss_curve":
-            split = action.split or "both"
-            if split == "train":
-                result = {"train_loss": data["loss_curve"]["train"]}
-            elif split == "val":
-                result = {"val_loss": data["loss_curve"]["val"]}
+            split = action.split
+            loss_data = data.get("loss_curve", {})
+            if split:
+                if split in loss_data:
+                    result = {split: loss_data[split]}
+                elif split == "train" and "train" in loss_data:
+                    result = {"train_loss": loss_data["train"]}
+                elif split == "val":
+                    val_keys = [k for k in loss_data.keys() if "val" in k.lower()]
+                    if not val_keys:
+                        return {"error": "No validation loss found"}, 0.0
+                    result = {k: loss_data[k] for k in val_keys}
+                else:
+                    return {"error": f"Split '{split}' not found. Available keys: {list(loss_data.keys())}"}, 0.0
             else:
-                result = data["loss_curve"]
+                result = loss_data
             return {"loss_curve": result}, intermediate_reward
 
         elif tool == "fetch_gpu_metrics":
@@ -241,11 +276,16 @@ class MLDebugEnv:
 
         elif tool == "fetch_class_metrics":
             class_id = action.class_id
+            cm = data.get("class_metrics", {})
             if class_id is not None:
-                cm = data.get("class_metrics", {})
-                result = {str(class_id): cm.get(class_id, cm.get(str(class_id), "not found"))}
+                if class_id in cm:
+                    result = {str(class_id): cm[class_id]}
+                elif str(class_id) in cm:
+                    result = {str(class_id): cm[str(class_id)]}
+                else:
+                    return {"error": f"Class {class_id} not found. Available classes: {list(cm.keys())}"}, 0.0
             else:
-                result = data.get("class_metrics", {})
+                result = cm
             return {"class_metrics": result}, intermediate_reward
 
         return {"error": f"Unknown tool: {tool}"}, 0.0
@@ -270,6 +310,10 @@ class MLDebugEnv:
     def _advance_or_end(self, reward: Reward, difficulty: str, current_task: Dict) -> Tuple[bool, Dict, Observation]:
         self._task_index += 1
         if self._task_index < len(self._tasks):
+            logger.info(
+                f"Task {current_task['task_id']} complete. "
+                f"Moving to {self._tasks[self._task_index]['task_id']}"
+            )
             next_obs = self._load_task(self._tasks[self._task_index])
             return False, {
                 "task_complete": difficulty,
@@ -277,6 +321,11 @@ class MLDebugEnv:
                 "next_task": next_obs.task_id,
             }, next_obs
         # All 3 tasks done — return final obs from last task
+        avg_score = sum(self._scores.values()) / max(len(self._scores), 1)
+        logger.info(
+            f"Episode complete. Scores: {self._scores}, "
+            f"Average: {avg_score:.2f}"
+        )
         final_obs = self._make_obs(
             current_task,
             tool_result={"graded": True, "score": reward.total, "episode_complete": True},
@@ -284,9 +333,7 @@ class MLDebugEnv:
         return True, {
             "episode_complete": True,
             "scores": self._scores,
-            "average_score": round(
-                sum(self._scores.values()) / max(len(self._scores), 1), 3
-            ),
+            "average_score": round(avg_score, 3),
         }, final_obs
 
     # ─── State ─────────────────────────────────────────────────────────────────

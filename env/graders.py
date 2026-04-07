@@ -4,7 +4,13 @@ Each grader returns a score in [0.0, 1.0] with a breakdown dict
 and feedback string explaining why points were given or lost.
 """
 
+import json
+import logging
+import os
+import re
 from typing import Any, Dict, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def _contains_any(text: str, keywords: list) -> bool:
@@ -304,11 +310,12 @@ def llm_grade(
     keyword_feedback: str,
 ) -> Tuple[float, Dict, str]:
     """
-    Optional LLM-based grading. Activates when USE_LLM_GRADING=true and HF_TOKEN is set.
-    Falls back to keyword grading on any error (API unavailable, quota exceeded, etc.).
-
-    The LLM scores 0.0–1.0 and its score is blended 60/40 with the keyword score
-    to ensure reproducibility while capturing open-ended reasoning quality.
+    Optional LLM-based grading with robust fallback.
+    
+    Tries multiple JSON extraction strategies:
+    1. Regex for JSON object in response
+    2. Plain text score extraction (Score: 0.85)
+    3. Fallback to keyword grading
     """
     use_llm = os.environ.get("USE_LLM_GRADING", "false").lower() == "true"
     hf_token = os.environ.get("HF_TOKEN", "")
@@ -318,6 +325,7 @@ def llm_grade(
 
     try:
         from openai import OpenAI
+        
         api_base = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
         model = os.environ.get("GRADER_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
         client = OpenAI(base_url=api_base, api_key=hf_token)
@@ -325,42 +333,16 @@ def llm_grade(
         prompt = f"""You are an expert ML debugging judge. Score the agent's diagnosis from 0.0 to 1.0.
 
 RUBRIC:
-- 0.5 points: Did the agent correctly identify the ROOT CAUSE? (must name the specific issue)
-- 0.5 points: Did the agent propose a SPECIFIC, ACTIONABLE fix? (vague answers score lower)
+- 0.5 points: Did the agent correctly identify the ROOT CAUSE?
+- 0.5 points: Did the agent propose a SPECIFIC, ACTIONABLE fix?
 
-FEW-SHOT EXAMPLES:
+BUG TYPE: {ground_truth.get('bug_type', 'unknown')}
+ROOT CAUSE: {ground_truth.get('root_cause', '')}
 
-Example 1 (PERFECT — score 1.0):
-  Bug: overfitting
-  Root cause: No regularization on small dataset
-  Agent diagnosis: "The model is overfitting — train loss drops to 0.05 but val loss rises after epoch 10"
-  Agent fix: "Add dropout=0.3 and weight_decay=1e-4 to prevent overfitting on this small dataset"
-  Score: 1.0 — correctly names overfitting AND proposes specific config values
+AGENT DIAGNOSIS: {action_data.get('diagnosis', '')}
+AGENT FIX: {action_data.get('fix_detail', '')}
 
-Example 2 (WRONG — score 0.0):
-  Bug: learning_rate_explosion
-  Root cause: LR=0.5 too high for SGD causing gradient explosion
-  Agent diagnosis: "The model performance could be better with more training"
-  Agent fix: "Try different hyperparameters"
-  Score: 0.0 — completely missed the root cause, fix is non-specific
-
-Example 3 (PARTIAL — score 0.5):
-  Bug: class_imbalance
-  Root cause: 95% majority class, model predicts majority always
-  Agent diagnosis: "There seems to be a data quality issue with some classes"
-  Agent fix: "Use weighted loss function"
-  Score: 0.5 — vaguely identified data issue (half credit) but named a specific fix
-
-NOW SCORE THIS:
-  BUG TYPE: {ground_truth.get('bug_type', 'unknown')}
-  ROOT CAUSE: {ground_truth.get('root_cause', '')}
-
-  AGENT DIAGNOSIS: {action_data.get('diagnosis', '')}
-  AGENT FIX TYPE: {action_data.get('fix_type', '')}
-  AGENT FIX DETAIL: {action_data.get('fix_detail', '')}
-
-Respond ONLY with a JSON object:
-{{"score": 0.0, "reasoning": "one sentence explanation"}}
+Respond ONLY with a JSON object: {{"score": 0.0, "reasoning": "brief explanation"}}
 """
 
         response = client.chat.completions.create(
@@ -368,26 +350,91 @@ Respond ONLY with a JSON object:
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150,
             temperature=0.0,
+            timeout=10.0,
         )
-        raw = response.choices[0].message.content.strip()
-        if "```" in raw:
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        result = json.loads(raw.strip())
-        llm_score = float(result.get("score", keyword_score))
-        llm_score = max(0.0, min(1.0, llm_score))
 
-        # 60% LLM + 40% keyword for robustness
+        raw = response.choices[0].message.content.strip()
+        llm_score, reasoning = _parse_llm_response(raw)
+        
+        if llm_score is None:
+            logger.warning(f"Failed to parse LLM response: {raw[:100]}")
+            return keyword_score, keyword_breakdown, keyword_feedback
+        
+        # ✅ Blend scores
         blended = round(0.6 * llm_score + 0.4 * keyword_score, 3)
-        reasoning = result.get("reasoning", "")
-        blended_feedback = f"{keyword_feedback} | 🤖 LLM score: {llm_score:.2f} ({reasoning[:80]})"
-        breakdown = {**keyword_breakdown, "llm_score": llm_score, "blended_score": blended}
+        blended_feedback = (
+            f"{keyword_feedback} | 🤖 LLM: {llm_score:.2f} ({reasoning[:60]}...)"
+        )
+        breakdown = {
+            **keyword_breakdown,
+            "llm_score": llm_score,
+            "blended_score": blended,
+        }
         return blended, breakdown, blended_feedback
 
+    except TimeoutError:
+        logger.error("LLM API timeout")
+        return keyword_score, keyword_breakdown, keyword_feedback
     except Exception as e:
-        # Graceful fallback — keyword grading always works
-        return keyword_score, keyword_breakdown, f"{keyword_feedback} | ⚠️ LLM grader unavailable, using keyword score"
+        logger.error(f"LLM grading failed: {e}")
+        return keyword_score, keyword_breakdown, keyword_feedback
+
+
+def _parse_llm_response(raw: str) -> Tuple[float | None, str]:
+    """
+    Extract score from LLM response with multiple fallback strategies.
+    
+    Returns:
+        (score, reasoning) where score in [0.0, 1.0] or None if parsing failed
+    """
+    
+    # ✅ STRATEGY 1: Extract JSON object using regex
+    json_match = re.search(r'\{[^{}]*\}', raw, re.DOTALL)
+    if json_match:
+        try:
+            result = json.loads(json_match.group())
+            if isinstance(result, dict):
+                score = result.get("score")
+                if isinstance(score, (int, float)):
+                    score = float(score)
+                    score = max(0.0, min(1.0, score))
+                    reasoning = result.get("reasoning", "LLM graded")
+                    return score, reasoning
+        except json.JSONDecodeError:
+            pass
+    
+    # ✅ STRATEGY 2: Extract from markdown JSON block
+    for block in re.findall(r'```(?:json)?\s*(\{.*?\})', raw, re.DOTALL):
+        try:
+            result = json.loads(block)
+            if isinstance(result, dict):
+                score = result.get("score")
+                if isinstance(score, (int, float)):
+                    score = float(score)
+                    score = max(0.0, min(1.0, score))
+                    reasoning = result.get("reasoning", "LLM graded")
+                    return score, reasoning
+        except json.JSONDecodeError:
+            continue
+    
+    # ✅ STRATEGY 3: Extract plain text score
+    score_match = re.search(r'(?:score|Score)\s*[:\"]?\s*([\d.]+)', raw, re.IGNORECASE)
+    if score_match:
+        try:
+            score = float(score_match.group(1))
+            score = max(0.0, min(1.0, score))
+            reasoning = "Extracted from plain text"
+            return score, reasoning
+        except ValueError:
+            pass
+    
+    # ✅ STRATEGY 4: Extract reasoning even without score
+    reason_match = re.search(r'(?:reasoning|Reasoning)[:\"]?\s*["\']?([^"\']+)', raw)
+    reasoning = reason_match.group(1) if reason_match else "Parse failed"
+    
+    # ❌ Failed to parse anything
+    logger.debug(f"Could not extract score from: {raw[:200]}")
+    return None, reasoning
 
 
 # ─── Dispatcher ────────────────────────────────────────────────────────────────

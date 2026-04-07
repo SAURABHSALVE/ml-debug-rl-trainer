@@ -270,7 +270,7 @@ class TestAPI:
         client.post("/reset")
         resp = client.get("/tasks")
         assert resp.status_code == 200
-        tasks = resp.json()
+        tasks = resp.json()["tasks"]
         # Episode always has exactly 3 tasks (1 easy, 1 medium, 1 hard)
         assert len(tasks) == 3
         difficulties = [t["difficulty"] for t in tasks]
