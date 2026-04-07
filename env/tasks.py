@@ -427,7 +427,15 @@ def generate_forgetting_task(seed: int = 33) -> Dict[str, Any]:
         "data": {
             "logs": logs,
             "config": config,
-            "loss_curve": {"train": pretrain_loss + finetune_loss_new, "val": []},
+            "loss_curve": {
+                "train": pretrain_loss + finetune_loss_new,
+                # Val curve: original-task loss stable during pretrain, then rises as forgetting occurs
+                "val_original_task": _smooth(2.1, 0.38, pretrain_epochs, noise=0.02, rng=rng)
+                              + _smooth(0.38, 3.85, finetune_epochs, noise=0.08, rng=rng),
+                "val_new_task": [None] * pretrain_epochs
+                              + _smooth(1.9, 0.25, finetune_epochs, noise=0.02, rng=rng),
+                "note": "val_original_task rises sharply during fine-tuning — catastrophic forgetting signal",
+            },
             "class_metrics": class_metrics,
             "gpu_metrics": {
                 "memory_mb": [rng.randint(5000, 6000) for _ in range(pretrain_epochs + finetune_epochs)],
@@ -450,6 +458,87 @@ def generate_forgetting_task(seed: int = 33) -> Dict[str, Any]:
                 "catastrophic", "forget", "forgetting", "overwrite",
                 "original task", "pretrain", "fine-tun", "collapse",
                 "backbone", "representation",
+            ],
+        },
+    }
+
+
+# ─── Task 6: NaN from Bad Initialization (Easy) ───────────────────────────────
+
+def generate_nan_init_task(seed: int = 77) -> Dict[str, Any]:
+    """
+    NaN loss from day 1 due to weight initialization std being 500× too large.
+    Easy: the loss curve and logs make it instantly obvious if the agent calls
+    fetch_loss_curve or fetch_logs. Agent must read the config to name init_std as the fix.
+    """
+    rng = random.Random(seed)
+    epochs = 8  # Training stopped early when NaN detected
+
+    # Loss is NaN from epoch 1
+    train_loss = [float("nan")] * epochs
+    val_loss   = [float("nan")] * epochs
+
+    logs = []
+    for i in range(epochs):
+        norm = round(rng.uniform(1e5, 1e7), 1) if i < 3 else float("nan")
+        norm_str = f"{norm:.1f}" if norm == norm else "nan"
+        logs.append(
+            f"Epoch {i+1:02d} | train_loss=nan | val_loss=nan | "
+            f"grad_norm={norm_str} | lr=0.0001"
+        )
+    logs[0] += " | WARNING: loss=nan on first forward pass — check model initialization"
+
+    config = {
+        "model": "BERT_small_custom",
+        "dataset": "news_classification_10class",
+        "epochs": 20,
+        "batch_size": 16,
+        "optimizer": "AdamW",
+        "lr": 1e-4,
+        "weight_decay": 0.01,
+        "init_std": 10.0,          # BUG: should be ~0.02 for BERT-style models
+        "init_mean": 0.0,
+        "layer_norm_eps": 1e-12,
+    }
+
+    gpu_metrics = {
+        "memory_mb": [rng.randint(4000, 4500) for _ in range(epochs)],
+        "util_pct": [rng.randint(5, 15) for _ in range(epochs)],  # Low util — training crashed fast
+    }
+
+    return {
+        "task_id": f"nan_init_{seed}",
+        "difficulty": "easy",
+        "description": (
+            "A custom BERT-small model was trained on a 10-class news classification dataset. "
+            "Training was automatically stopped after 8 epochs because the loss was NaN from "
+            "the very first forward pass. GPU utilization is near zero — the model isn't learning at all. "
+            "Investigate the root cause and prescribe a specific config fix."
+        ),
+        "data": {
+            "logs": logs,
+            "config": config,
+            "loss_curve": {
+                "train": [99.9] * epochs,   # NaN replaced for API transport
+                "val":   [99.9] * epochs,
+                "note":  "train and val loss are NaN every epoch — catastrophic failure from epoch 1",
+            },
+            "gpu_metrics": gpu_metrics,
+            "class_metrics": {i: 0.1 for i in range(10)},  # All ~random — model never learned
+        },
+        "ground_truth": {
+            "bug_type": "bad_initialization",
+            "root_cause": "Weight init_std=10.0 is ~500x too large for a BERT-style model (should be ~0.02), causing activations to overflow to NaN immediately",
+            "affected_config_keys": ["init_std"],
+            "valid_fix_types": ["config_change"],
+            "valid_fix_keywords": [
+                "init", "initialization", "init_std", "weight init",
+                "std", "xavier", "kaiming", "normal init", "0.02",
+            ],
+            "diagnosis_keywords": [
+                "init", "initialization", "weight init", "init_std",
+                "nan", "overflow", "explod", "first epoch", "bad init",
+                "std too large", "too high",
             ],
         },
     }

@@ -180,6 +180,43 @@ def grade_data_poisoning(action_data: Dict[str, Any], ground_truth: Dict[str, An
     return total, breakdown, " | ".join(feedback_parts)
 
 
+# ─── Task 6 Grader: Bad Initialization (NaN loss) ────────────────────────────
+
+def grade_nan_init(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    diagnosis = (action_data.get("diagnosis") or "").strip()
+    fix_type = (action_data.get("fix_type") or "").strip()
+    fix_detail = (action_data.get("fix_detail") or "").strip()
+
+    breakdown = {}
+    feedback_parts = []
+
+    # 0.5 pts — identifies bad initialization as root cause
+    if _contains_any(diagnosis, ground_truth["diagnosis_keywords"]):
+        breakdown["diagnosis"] = 0.5
+        feedback_parts.append("✅ Correctly identified bad weight initialization as root cause")
+    else:
+        breakdown["diagnosis"] = 0.0
+        feedback_parts.append("❌ Did not identify weight initialization as the problem")
+
+    # 0.5 pts — valid fix
+    fix_score = 0.0
+    if fix_type in ground_truth["valid_fix_types"]:
+        fix_score += 0.2
+    if _contains_any(fix_detail, ground_truth["valid_fix_keywords"]):
+        fix_score += 0.3
+
+    breakdown["fix"] = round(fix_score, 3)
+    if fix_score >= 0.4:
+        feedback_parts.append("✅ Proposed valid initialization fix (Xavier/Kaiming/correct std)")
+    elif fix_score > 0:
+        feedback_parts.append("⚠️ Fix partially correct — specify correct init scheme or std value")
+    else:
+        feedback_parts.append("❌ Fix is incorrect or missing")
+
+    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    return total, breakdown, " | ".join(feedback_parts)
+
+
 # ─── Task 4 Grader: Class Imbalance ───────────────────────────────────────────
 
 def grade_class_imbalance(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
@@ -285,21 +322,46 @@ def llm_grade(
         model = os.environ.get("GRADER_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
         client = OpenAI(base_url=api_base, api_key=hf_token)
 
-        prompt = f"""You are an expert ML debugging evaluator. Score the agent's diagnosis.
+        prompt = f"""You are an expert ML debugging judge. Score the agent's diagnosis from 0.0 to 1.0.
 
-BUG TYPE: {ground_truth.get('bug_type', 'unknown')}
-ROOT CAUSE: {ground_truth.get('root_cause', '')}
+RUBRIC:
+- 0.5 points: Did the agent correctly identify the ROOT CAUSE? (must name the specific issue)
+- 0.5 points: Did the agent propose a SPECIFIC, ACTIONABLE fix? (vague answers score lower)
 
-AGENT DIAGNOSIS: {action_data.get('diagnosis', '')}
-AGENT FIX TYPE: {action_data.get('fix_type', '')}
-AGENT FIX DETAIL: {action_data.get('fix_detail', '')}
+FEW-SHOT EXAMPLES:
 
-Score the agent's response from 0.0 to 1.0 based on:
-- 0.5 points: Did the agent correctly identify the root cause?
-- 0.5 points: Did the agent propose a specific, actionable, correct fix?
+Example 1 (PERFECT — score 1.0):
+  Bug: overfitting
+  Root cause: No regularization on small dataset
+  Agent diagnosis: "The model is overfitting — train loss drops to 0.05 but val loss rises after epoch 10"
+  Agent fix: "Add dropout=0.3 and weight_decay=1e-4 to prevent overfitting on this small dataset"
+  Score: 1.0 — correctly names overfitting AND proposes specific config values
+
+Example 2 (WRONG — score 0.0):
+  Bug: learning_rate_explosion
+  Root cause: LR=0.5 too high for SGD causing gradient explosion
+  Agent diagnosis: "The model performance could be better with more training"
+  Agent fix: "Try different hyperparameters"
+  Score: 0.0 — completely missed the root cause, fix is non-specific
+
+Example 3 (PARTIAL — score 0.5):
+  Bug: class_imbalance
+  Root cause: 95% majority class, model predicts majority always
+  Agent diagnosis: "There seems to be a data quality issue with some classes"
+  Agent fix: "Use weighted loss function"
+  Score: 0.5 — vaguely identified data issue (half credit) but named a specific fix
+
+NOW SCORE THIS:
+  BUG TYPE: {ground_truth.get('bug_type', 'unknown')}
+  ROOT CAUSE: {ground_truth.get('root_cause', '')}
+
+  AGENT DIAGNOSIS: {action_data.get('diagnosis', '')}
+  AGENT FIX TYPE: {action_data.get('fix_type', '')}
+  AGENT FIX DETAIL: {action_data.get('fix_detail', '')}
 
 Respond ONLY with a JSON object:
-{{"score": 0.0, "reasoning": "brief explanation"}}"""
+{{"score": 0.0, "reasoning": "one sentence explanation"}}
+"""
 
         response = client.chat.completions.create(
             model=model,
@@ -333,6 +395,7 @@ Respond ONLY with a JSON object:
 # Map bug_type → grader function (supports multiple tasks per difficulty)
 BUG_TYPE_GRADERS = {
     "overfitting":             grade_overfitting,
+    "bad_initialization":      grade_nan_init,
     "learning_rate_explosion": grade_lr_explosion,
     "silent_data_poisoning":   grade_data_poisoning,
     "class_imbalance":         grade_class_imbalance,

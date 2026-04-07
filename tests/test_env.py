@@ -9,11 +9,11 @@ from fastapi.testclient import TestClient
 
 from app import app
 from env.environment import MLDebugEnv
-from env.graders import grade_overfitting, grade_lr_explosion, grade_data_poisoning, grade_class_imbalance, grade_forgetting
+from env.graders import grade_overfitting, grade_lr_explosion, grade_data_poisoning, grade_class_imbalance, grade_forgetting, grade_nan_init
 from env.models import Action
 from env.tasks import (
     generate_overfitting_task, generate_lr_explosion_task, generate_poisoning_task,
-    generate_class_imbalance_task, generate_forgetting_task,
+    generate_class_imbalance_task, generate_forgetting_task, generate_nan_init_task,
 )
 
 client = TestClient(app)
@@ -242,17 +242,21 @@ class TestAPI:
         assert data["done"] is False
 
     def test_step_diagnose(self):
-        client.post("/reset")
-        resp = client.post("/step", json={
-            "action_type": "diagnose",
-            "diagnosis": "The model is overfitting — val loss diverges significantly",
-            "fix_type": "config_change",
-            "fix_detail": "Add dropout=0.3 and weight_decay=1e-4",
-            "confidence": 0.9,
-        })
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["reward"]["score"] >= 0.5
+        """Tests that diagnose action returns valid reward structure.
+        Uses direct env access to guarantee overfitting easy task."""
+        from env.environment import MLDebugEnv as _Env
+        from env.models import Action as _Action
+        env = _Env(seed=1)
+        env.reset()
+        obs, reward, done, info = env.step(_Action(
+            action_type="diagnose",
+            diagnosis="The model is overfitting — val loss diverges significantly",
+            fix_type="config_change",
+            fix_detail="Add dropout=0.3 and weight_decay=1e-4",
+            confidence=0.9,
+        ))
+        assert reward.total >= 0.5
+        assert reward.feedback != ""
 
     def test_state(self):
         client.post("/reset")
@@ -285,18 +289,22 @@ class TestAPI:
         assert resp.status_code == 404
 
     def test_reward_partial_credit(self):
-        """Verify partial credit is given for incomplete but relevant answers."""
-        client.post("/reset")
-        resp = client.post("/step", json={
-            "action_type": "diagnose",
-            "diagnosis": "The model is overfitting",
-            "fix_type": "wrong_type",
-            "fix_detail": "unknown",
-            "confidence": 0.5,
-        })
-        data = resp.json()
-        score = data["reward"]["score"]
-        assert 0.0 < score < 1.0, "Should give partial credit"
+        """Verify partial credit is given for incomplete but relevant answers.
+        Uses a fixed-seed env to guarantee the overfitting easy task is selected.
+        """
+        from env.environment import MLDebugEnv as _Env
+        from env.models import Action as _Action
+        env = _Env(seed=1)
+        env.reset()
+        _, reward, _, _ = env.step(_Action(
+            action_type="diagnose",
+            diagnosis="The model is overfitting",
+            fix_type="wrong_type",
+            fix_detail="unknown",
+            confidence=0.5,
+        ))
+        score = reward.total
+        assert 0.0 < score < 1.0, f"Should give partial credit, got {score}"
 
 
 # ─── New Grader Tests ───────────────────────────────────────────────────────────
@@ -395,3 +403,54 @@ class TestTaskPool:
             seen_medium_task_ids.add(medium_task["task_id"].split("_")[0] + "_" + medium_task["task_id"].split("_")[1])
         # Should see both types of medium tasks across 50 episodes
         assert len(seen_medium_task_ids) >= 2, f"Expected variety in medium tasks, only saw: {seen_medium_task_ids}"
+
+    def test_easy_task_pool_varies(self):
+        """Verify the easy pool now has 2 variants — overfitting and nan_init."""
+        seen_easy_task_types = set()
+        for seed in range(50):
+            env = MLDebugEnv(seed=seed)
+            env.reset()
+            tasks = env.list_tasks()
+            easy_task = next(t for t in tasks if t["difficulty"] == "easy")
+            # task_id format: overfitting_NNNN or nan_init_NNNN
+            task_type = easy_task["task_id"].rsplit("_", 1)[0]
+            seen_easy_task_types.add(task_type)
+        assert len(seen_easy_task_types) >= 2, f"Easy pool should have 2 variants, only saw: {seen_easy_task_types}"
+
+
+# ─── NaN Init Grader Tests ────────────────────────────────────────────────
+
+class TestNaNInitGrader:
+    def setup_method(self):
+        self.gt = generate_nan_init_task(77)["ground_truth"]
+
+    def test_perfect_score(self):
+        action = {
+            "diagnosis": "Bad weight initialization — init_std=10.0 is 500x too large, causing NaN from first forward pass",
+            "fix_type": "config_change",
+            "fix_detail": "Set init_std=0.02 to match standard BERT initialization (Xavier/normal init)",
+            "confidence": 0.95,
+        }
+        score, breakdown, _ = grade_nan_init(action, self.gt)
+        assert score >= 0.8, f"Expected >=0.8, got {score}"
+        assert breakdown["diagnosis"] == 0.5
+
+    def test_partial_score_diagnosis_only(self):
+        action = {
+            "diagnosis": "The model has a bad initialization causing NaN loss from the first epoch",
+            "fix_type": "wrong_type",
+            "fix_detail": "Try something different",
+            "confidence": 0.5,
+        }
+        score, breakdown, _ = grade_nan_init(action, self.gt)
+        assert 0.3 <= score < 0.8
+
+    def test_zero_score(self):
+        action = {
+            "diagnosis": "The model is overfitting to the training data",
+            "fix_type": "config_change",
+            "fix_detail": "Add dropout and reduce model capacity",
+            "confidence": 0.4,
+        }
+        score, _, _ = grade_nan_init(action, self.gt)
+        assert score <= 0.2

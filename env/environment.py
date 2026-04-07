@@ -26,11 +26,12 @@ from env.tasks import (
     generate_poisoning_task,
     generate_class_imbalance_task,
     generate_forgetting_task,
+    generate_nan_init_task,
 )
 
 # Task pool by difficulty bracket — 3 per episode (1 easy, 1 medium, 1 hard)
 TASK_POOL = {
-    "easy":   [generate_overfitting_task],
+    "easy":   [generate_overfitting_task, generate_nan_init_task],
     "medium": [generate_lr_explosion_task, generate_class_imbalance_task],
     "hard":   [generate_poisoning_task, generate_forgetting_task],
 }
@@ -45,11 +46,20 @@ AVAILABLE_TOOLS = [
     "diagnose",
 ]
 
-# Which tools are actually relevant per task difficulty
+# Which tools give a +0.02 reward signal per bug type (keyed by bug_type for precision)
+RELEVANT_TOOLS_BY_BUG = {
+    "overfitting":             {"fetch_loss_curve", "fetch_config"},
+    "bad_initialization":      {"fetch_logs", "fetch_config"},
+    "learning_rate_explosion": {"fetch_logs", "fetch_config"},
+    "class_imbalance":         {"fetch_class_metrics", "fetch_config"},
+    "silent_data_poisoning":   {"fetch_class_metrics", "fetch_logs"},
+    "catastrophic_forgetting": {"fetch_logs", "fetch_loss_curve"},
+}
+# Fallback by difficulty
 RELEVANT_TOOLS = {
-    "easy": {"fetch_loss_curve", "fetch_config"},
+    "easy":   {"fetch_loss_curve", "fetch_config"},
     "medium": {"fetch_logs", "fetch_config"},
-    "hard": {"fetch_class_metrics", "fetch_logs"},
+    "hard":   {"fetch_class_metrics", "fetch_logs"},
 }
 
 
@@ -194,7 +204,8 @@ class MLDebugEnv:
     def _handle_tool_call(self, action: Action, task: Dict[str, Any]) -> Tuple[Dict, float]:
         data = task["data"]
         tool = action.action_type
-        relevant = RELEVANT_TOOLS.get(task["difficulty"], set())
+        bug_type = task.get("ground_truth", {}).get("bug_type", "")
+        relevant = RELEVANT_TOOLS_BY_BUG.get(bug_type) or RELEVANT_TOOLS.get(task["difficulty"], set())
 
         # Penalty for repeating same tool
         if tool in self._called_tools:
