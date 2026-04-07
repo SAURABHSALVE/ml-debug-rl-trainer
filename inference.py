@@ -50,18 +50,27 @@ You have a LIMITED budget of steps per task. Use them wisely.
 INVESTIGATION TOOLS (each costs 1 step):
 - fetch_loss_curve: {"action_type": "fetch_loss_curve", "split": "val"}
 - fetch_config: {"action_type": "fetch_config", "keys": ["lr", "dropout", "optimizer"]}
-- fetch_logs: {"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 10}
+- fetch_logs: {"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 15}
 - fetch_gpu_metrics: {"action_type": "fetch_gpu_metrics"}
 - fetch_class_metrics: {"action_type": "fetch_class_metrics", "class_id": 0}
 
 TERMINAL ACTION (ends the task — use when confident):
 - diagnose: {"action_type": "diagnose", "diagnosis": "...", "fix_type": "config_change|data_fix|architecture_change", "fix_detail": "...", "confidence": 0.9}
 
-STRATEGY:
-1. Start with the most informative tool for the task type
-2. Do not repeat the same tool call
-3. Once you have enough evidence, call diagnose
-4. Be specific in fix_detail — include exact values where possible
+STRATEGY BY TASK TYPE:
+- EASY (overfitting): Start with fetch_loss_curve to see train vs val divergence, then fetch_config to check regularization params.
+- MEDIUM (LR/gradient): Start with fetch_logs to see gradient norms and loss explosion, then fetch_config to check lr value.
+- HARD (data quality): ALWAYS check ALL 5 classes (class_id 0–4) one by one using fetch_class_metrics. Look for the ONE class with significantly lower accuracy than the others. Also fetch_logs for anomaly warnings.
+
+ANTI-PATTERNS (avoid these):
+- Do NOT repeat the same tool call with the same parameters — it costs a step and gives nothing new.
+- Do NOT call fetch_gpu_metrics unless all other tools have been used — GPU is rarely the cause.
+- For hard tasks: do not diagnose before checking ALL class metrics.
+
+When diagnosing, be SPECIFIC:
+- Name the exact class that is corrupted (e.g., "class_2 has corrupted labels")
+- Include exact config values (e.g., "reduce lr from 0.5 to 0.001")
+- Use fix_type=data_fix for data/label problems, config_change for hyperparameter problems.
 
 Always respond with a single valid JSON object. No explanation outside the JSON."""
 

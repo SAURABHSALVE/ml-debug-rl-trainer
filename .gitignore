@@ -278,3 +278,10 @@ data/
 *.temp
 *.swp
 *.swo
+
+# Project scratch files
+files.txt
+out.txt
+read_files.txt
+test_output.txt
+tree.json

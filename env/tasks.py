@@ -190,7 +190,7 @@ def generate_poisoning_task(seed: int = 7) -> Dict[str, Any]:
             f"val_loss={val_loss[i]:.4f} val_acc={val_acc[i]:.4f}"
         )
         if i == 13:
-            line += f" | WARNING: label_consistency_check class_{poisoned_class} score=0.61"
+            line += " | WARNING: anomaly_detector flagged inconsistency in 1 class — per-class audit recommended"
         logs.append(line)
 
     config = {
@@ -253,8 +253,9 @@ def generate_poisoning_task(seed: int = 7) -> Dict[str, Any]:
             "valid_fix_types": ["data_fix"],
             "valid_fix_keywords": ["label", "corrupt", "annotate", "clean", "audit", "reannotate"],
             "diagnosis_keywords": [
-                "poison", "corrupt", "label", "class", "per-class",
-                "data", "annotation", f"class_{poisoned_class}", str(poisoned_class)
+                "poison", "corrupt", "label corrupt", "corrupted label",
+                "mislabel", "annotation error", "bad label", "label noise",
+                f"class_{poisoned_class}",
             ],
         },
     }

@@ -124,9 +124,21 @@ def grade_data_poisoning(action_data: Dict[str, Any], ground_truth: Dict[str, An
     poisoned_class = ground_truth["poisoned_class"]
 
     # 0.3 pts — identifies data/label corruption as bug type
-    if _contains_any(diagnosis, ground_truth["diagnosis_keywords"]):
+    # Requires BOTH a data-problem signal AND a corruption-specifc term to prevent
+    # vague matches on common words like "data" or "class"
+    corruption_keywords = ["poison", "corrupt", "mislabel", "label noise", "label corrupt",
+                           "corrupted label", "bad label", "annotation error"]
+    data_context_keywords = ["label", "data", "annotation", "class", "training data"]
+
+    has_corruption_term = _contains_any(diagnosis, corruption_keywords)
+    has_data_context = _contains_any(diagnosis, data_context_keywords)
+
+    if has_corruption_term and has_data_context:
         breakdown["bug_type"] = 0.3
         feedback_parts.append("✅ Identified label/data corruption as root cause")
+    elif has_corruption_term:
+        breakdown["bug_type"] = 0.15
+        feedback_parts.append("⚠️ Mentioned corruption but didn't connect it to labels/data clearly")
     else:
         breakdown["bug_type"] = 0.0
         feedback_parts.append("❌ Did not identify data poisoning / label corruption")
