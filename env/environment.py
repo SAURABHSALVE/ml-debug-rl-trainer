@@ -24,7 +24,16 @@ from env.tasks import (
     generate_lr_explosion_task,
     generate_overfitting_task,
     generate_poisoning_task,
+    generate_class_imbalance_task,
+    generate_forgetting_task,
 )
+
+# Task pool by difficulty bracket — 3 per episode (1 easy, 1 medium, 1 hard)
+TASK_POOL = {
+    "easy":   [generate_overfitting_task],
+    "medium": [generate_lr_explosion_task, generate_class_imbalance_task],
+    "hard":   [generate_poisoning_task, generate_forgetting_task],
+}
 
 # Tools that reveal data — ordered from most to least relevant per task
 AVAILABLE_TOOLS = [
@@ -61,18 +70,22 @@ class MLDebugEnv:
         # Scores per task
         self._scores: Dict[str, float] = {}
 
-        # Max steps per task
-        self._max_steps_map = {"easy": 5, "medium": 5, "hard": 7}
+        # Max steps per task difficulty
+        self._max_steps_map = {"easy": 5, "medium": 6, "hard": 8}
 
     # ─── Reset ─────────────────────────────────────────────────────────────────
 
     def reset(self) -> Observation:
-        """Start a new episode. Returns Task 1 (easy) observation."""
+        """Start a new episode. Picks 1 easy + 1 medium + 1 hard task from the pool."""
         s = self._rng.randint(1, 9999)
+        # Pick one generator from each difficulty bracket
+        easy_gen   = self._rng.choice(TASK_POOL["easy"])
+        medium_gen = self._rng.choice(TASK_POOL["medium"])
+        hard_gen   = self._rng.choice(TASK_POOL["hard"])
         self._tasks = [
-            generate_overfitting_task(seed=s),
-            generate_lr_explosion_task(seed=s + 1),
-            generate_poisoning_task(seed=s + 2),
+            easy_gen(seed=s),
+            medium_gen(seed=s + 1),
+            hard_gen(seed=s + 2),
         ]
         self._task_index = 0
         self._scores = {}

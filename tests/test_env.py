@@ -9,9 +9,12 @@ from fastapi.testclient import TestClient
 
 from app import app
 from env.environment import MLDebugEnv
-from env.graders import grade_overfitting, grade_lr_explosion, grade_data_poisoning
+from env.graders import grade_overfitting, grade_lr_explosion, grade_data_poisoning, grade_class_imbalance, grade_forgetting
 from env.models import Action
-from env.tasks import generate_overfitting_task, generate_lr_explosion_task, generate_poisoning_task
+from env.tasks import (
+    generate_overfitting_task, generate_lr_explosion_task, generate_poisoning_task,
+    generate_class_imbalance_task, generate_forgetting_task,
+)
 
 client = TestClient(app)
 
@@ -264,6 +267,7 @@ class TestAPI:
         resp = client.get("/tasks")
         assert resp.status_code == 200
         tasks = resp.json()
+        # Episode always has exactly 3 tasks (1 easy, 1 medium, 1 hard)
         assert len(tasks) == 3
         difficulties = [t["difficulty"] for t in tasks]
         assert "easy" in difficulties
@@ -293,3 +297,101 @@ class TestAPI:
         data = resp.json()
         score = data["reward"]["score"]
         assert 0.0 < score < 1.0, "Should give partial credit"
+
+
+# ─── New Grader Tests ───────────────────────────────────────────────────────────
+
+class TestClassImbalanceGrader:
+    def setup_method(self):
+        self.gt = generate_class_imbalance_task(55)["ground_truth"]
+
+    def test_perfect_score(self):
+        action = {
+            "diagnosis": "Severe class imbalance — 95% of data is the majority class, model predicts it always",
+            "fix_type": "config_change",
+            "fix_detail": "Add class weights and use weighted loss or oversample minority classes with SMOTE",
+            "confidence": 0.9,
+        }
+        score, breakdown, feedback = grade_class_imbalance(action, self.gt)
+        assert score >= 0.8, f"Expected >=0.8, got {score}"
+        assert breakdown["diagnosis"] == 0.5
+
+    def test_partial_score_diagnosis_only(self):
+        action = {
+            "diagnosis": "The dataset has a dominant class causing skewed predictions",
+            "fix_type": "wrong_type",
+            "fix_detail": "Try something",
+            "confidence": 0.4,
+        }
+        score, breakdown, _ = grade_class_imbalance(action, self.gt)
+        assert 0.3 <= score < 0.8
+
+    def test_zero_score(self):
+        action = {
+            "diagnosis": "The learning rate is too high",
+            "fix_type": "config_change",
+            "fix_detail": "Reduce lr",
+            "confidence": 0.3,
+        }
+        score, _, _ = grade_class_imbalance(action, self.gt)
+        assert score <= 0.2
+
+
+class TestForgettingGrader:
+    def setup_method(self):
+        self.gt = generate_forgetting_task(33)["ground_truth"]
+
+    def test_perfect_score(self):
+        action = {
+            "diagnosis": "Catastrophic forgetting — fine-tuning without EWC overwrites original task weights completely",
+            "fix_type": "config_change",
+            "fix_detail": "Freeze the backbone layers and use elastic weight consolidation (EWC) or a replay buffer",
+            "confidence": 0.9,
+        }
+        score, breakdown, feedback = grade_forgetting(action, self.gt)
+        assert score >= 0.8, f"Expected >=0.8, got {score}"
+        assert breakdown["diagnosis"] == 0.5
+
+    def test_partial_score_diagnosis_only(self):
+        action = {
+            "diagnosis": "The model is forgetting the original pretrained task representation",
+            "fix_type": "wrong_type",
+            "fix_detail": "Do something about it",
+            "confidence": 0.5,
+        }
+        score, breakdown, _ = grade_forgetting(action, self.gt)
+        assert 0.3 <= score < 0.8
+
+    def test_zero_score(self):
+        action = {
+            "diagnosis": "The validation loss is too high — overfitting",
+            "fix_type": "config_change",
+            "fix_detail": "Add dropout",
+            "confidence": 0.3,
+        }
+        score, _, _ = grade_forgetting(action, self.gt)
+        assert score <= 0.2
+
+
+class TestTaskPool:
+    def test_episode_always_has_3_tasks(self):
+        """Verify every reset gives exactly 3 tasks (easy, medium, hard)."""
+        for seed in [1, 42, 999, 12345]:
+            env = MLDebugEnv(seed=seed)
+            obs = env.reset()
+            tasks = env.list_tasks()
+            assert len(tasks) == 3, f"Seed {seed}: expected 3 tasks, got {len(tasks)}"
+            difficulties = {t["difficulty"] for t in tasks}
+            assert difficulties == {"easy", "medium", "hard"}, f"Seed {seed}: wrong difficulties {difficulties}"
+
+    def test_medium_task_pool_varies(self):
+        """Verify different seeds can produce different medium tasks from the pool."""
+        seen_medium_task_ids = set()
+        for seed in range(50):
+            env = MLDebugEnv(seed=seed)
+            env.reset()
+            tasks = env.list_tasks()
+            medium_task = next(t for t in tasks if t["difficulty"] == "medium")
+            seen_medium_task_ids.add(medium_task["task_id"].split("_")[0] + "_" + medium_task["task_id"].split("_")[1])
+        # Should see both types of medium tasks across 50 episodes
+        assert len(seen_medium_task_ids) >= 2, f"Expected variety in medium tasks, only saw: {seen_medium_task_ids}"

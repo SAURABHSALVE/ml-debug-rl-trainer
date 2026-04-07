@@ -1,5 +1,5 @@
 name: ml-experiment-debugger
-version: "1.0.0"
+version: "1.1.0"
 description: >
   An RL environment where AI agents diagnose broken ML training runs
   through multi-step investigation. The agent receives a task description
@@ -8,8 +8,16 @@ description: >
   costs one step from a limited budget. When ready, agent calls diagnose
   to submit the root cause and fix. Wrong investigation choices waste
   budget and lower efficiency score.
-  3 tasks: overfitting (easy), LR explosion (medium), silent data
-  poisoning (hard).
+
+  5 tasks across 3 difficulty levels (3 randomly sampled per episode):
+  - overfitting_detection (easy)
+  - lr_explosion (medium)
+  - class_imbalance (medium)
+  - silent_data_poisoning (hard)
+  - catastrophic_forgetting (hard)
+
+  Grading: keyword-based (always) + optional LLM grader (USE_LLM_GRADING=true)
+  with 60/40 blending for reproducibility + reasoning quality.
 
 author: AIverse
 difficulty_levels: [easy, medium, hard]
@@ -32,7 +40,7 @@ action_space:
       description: Fetch GPU memory and utilization over time
       params: []
     - name: fetch_class_metrics
-      description: Fetch per-class accuracy breakdown
+      description: Fetch per-class accuracy breakdown for a specific class
       params: [class_id]
     - name: diagnose
       description: Submit final root cause diagnosis and fix (terminal action per task)
@@ -53,26 +61,49 @@ observation_space:
     - available_tools
 
 reward:
-  tool_call_relevant: +0.02 (small signal for useful investigation step)
-  tool_call_redundant: -0.01 (penalty for repeating same call)
-  diagnose: graded 0.0-1.0 based on correctness of diagnosis and fix
-  efficiency_bonus: +0.05 if correct diagnosis reached in <= half the budget
-  trajectory_bonus: +0.05 on hard task if easy>0.7 and medium>0.6
+  tool_call_relevant: 0.02
+  tool_call_redundant: -0.01
+  diagnose_score_range: [0.0, 1.0]
+  efficiency_bonus: 0.05
+  trajectory_bonus: 0.05
+  grading_modes:
+    keyword: always_active
+    llm_blended: optional_USE_LLM_GRADING_env_var
+    blend_ratio: "60% LLM + 40% keyword"
 
 tasks:
   - id: overfitting_detection
     difficulty: easy
     score_range: [0.0, 1.0]
     max_steps: 5
+    pool_slot: easy
 
   - id: lr_explosion
     difficulty: medium
     score_range: [0.0, 1.0]
-    max_steps: 5
+    max_steps: 6
+    pool_slot: medium
+
+  - id: class_imbalance
+    difficulty: medium
+    score_range: [0.0, 1.0]
+    max_steps: 6
+    pool_slot: medium
 
   - id: silent_data_poisoning
     difficulty: hard
     score_range: [0.0, 1.0]
-    max_steps: 7
+    max_steps: 8
+    pool_slot: hard
 
-tags: [ml-engineering, debugging, real-world, multi-step, tool-use, huggingface]
+  - id: catastrophic_forgetting
+    difficulty: hard
+    score_range: [0.0, 1.0]
+    max_steps: 8
+    pool_slot: hard
+
+episode:
+  tasks_per_episode: 3
+  selection: "1 from each difficulty pool (random, seeded)"
+
+tags: [ml-engineering, debugging, real-world, multi-step, tool-use, huggingface, llm-grading, class-imbalance, catastrophic-forgetting]

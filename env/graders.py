@@ -180,17 +180,183 @@ def grade_data_poisoning(action_data: Dict[str, Any], ground_truth: Dict[str, An
     return total, breakdown, " | ".join(feedback_parts)
 
 
+# ─── Task 4 Grader: Class Imbalance ───────────────────────────────────────────
+
+def grade_class_imbalance(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    diagnosis = (action_data.get("diagnosis") or "").strip()
+    fix_type = (action_data.get("fix_type") or "").strip()
+    fix_detail = (action_data.get("fix_detail") or "").strip()
+
+    breakdown = {}
+    feedback_parts = []
+
+    # 0.5 pts — identifies class imbalance as root cause
+    if _contains_any(diagnosis, ground_truth["diagnosis_keywords"]):
+        breakdown["diagnosis"] = 0.5
+        feedback_parts.append("✅ Correctly identified class imbalance as root cause")
+    else:
+        breakdown["diagnosis"] = 0.0
+        feedback_parts.append("❌ Did not identify class imbalance")
+
+    # 0.5 pts — valid fix
+    fix_score = 0.0
+    if fix_type in ground_truth["valid_fix_types"]:
+        fix_score += 0.2
+    if _contains_any(fix_detail, ground_truth["valid_fix_keywords"]):
+        fix_score += 0.3
+
+    breakdown["fix"] = round(fix_score, 3)
+    if fix_score >= 0.4:
+        feedback_parts.append("✅ Proposed a valid class-balancing fix")
+    elif fix_score > 0:
+        feedback_parts.append("⚠️ Fix partially correct — be more specific")
+    else:
+        feedback_parts.append("❌ Fix is incorrect or missing")
+
+    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    return total, breakdown, " | ".join(feedback_parts)
+
+
+# ─── Task 5 Grader: Catastrophic Forgetting ───────────────────────────────────
+
+def grade_forgetting(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    diagnosis = (action_data.get("diagnosis") or "").strip()
+    fix_type = (action_data.get("fix_type") or "").strip()
+    fix_detail = (action_data.get("fix_detail") or "").strip()
+
+    breakdown = {}
+    feedback_parts = []
+
+    # 0.5 pts — identifies catastrophic forgetting
+    if _contains_any(diagnosis, ground_truth["diagnosis_keywords"]):
+        breakdown["diagnosis"] = 0.5
+        feedback_parts.append("✅ Identified catastrophic forgetting as root cause")
+    else:
+        breakdown["diagnosis"] = 0.0
+        feedback_parts.append("❌ Did not identify catastrophic forgetting")
+
+    # 0.5 pts — valid continual learning fix
+    fix_score = 0.0
+    if fix_type in ground_truth["valid_fix_types"]:
+        fix_score += 0.2
+    if _contains_any(fix_detail, ground_truth["valid_fix_keywords"]):
+        fix_score += 0.3
+
+    breakdown["fix"] = round(fix_score, 3)
+    if fix_score >= 0.4:
+        feedback_parts.append("✅ Proposed a valid continual learning fix (EWC/freeze/replay)")
+    elif fix_score > 0:
+        feedback_parts.append("⚠️ Fix partially correct — mention specific technique")
+    else:
+        feedback_parts.append("❌ Fix is incorrect or missing")
+
+    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    return total, breakdown, " | ".join(feedback_parts)
+
+
+# ─── LLM Grader (with keyword fallback) ───────────────────────────────────────
+
+import os
+import json
+
+def llm_grade(
+    action_data: Dict[str, Any],
+    ground_truth: Dict[str, Any],
+    keyword_score: float,
+    keyword_breakdown: Dict,
+    keyword_feedback: str,
+) -> Tuple[float, Dict, str]:
+    """
+    Optional LLM-based grading. Activates when USE_LLM_GRADING=true and HF_TOKEN is set.
+    Falls back to keyword grading on any error (API unavailable, quota exceeded, etc.).
+
+    The LLM scores 0.0–1.0 and its score is blended 60/40 with the keyword score
+    to ensure reproducibility while capturing open-ended reasoning quality.
+    """
+    use_llm = os.environ.get("USE_LLM_GRADING", "false").lower() == "true"
+    hf_token = os.environ.get("HF_TOKEN", "")
+
+    if not use_llm or not hf_token:
+        return keyword_score, keyword_breakdown, keyword_feedback
+
+    try:
+        from openai import OpenAI
+        api_base = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
+        model = os.environ.get("GRADER_MODEL", "meta-llama/Llama-3.3-70B-Instruct")
+        client = OpenAI(base_url=api_base, api_key=hf_token)
+
+        prompt = f"""You are an expert ML debugging evaluator. Score the agent's diagnosis.
+
+BUG TYPE: {ground_truth.get('bug_type', 'unknown')}
+ROOT CAUSE: {ground_truth.get('root_cause', '')}
+
+AGENT DIAGNOSIS: {action_data.get('diagnosis', '')}
+AGENT FIX TYPE: {action_data.get('fix_type', '')}
+AGENT FIX DETAIL: {action_data.get('fix_detail', '')}
+
+Score the agent's response from 0.0 to 1.0 based on:
+- 0.5 points: Did the agent correctly identify the root cause?
+- 0.5 points: Did the agent propose a specific, actionable, correct fix?
+
+Respond ONLY with a JSON object:
+{{"score": 0.0, "reasoning": "brief explanation"}}"""
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            temperature=0.0,
+        )
+        raw = response.choices[0].message.content.strip()
+        if "```" in raw:
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw.strip())
+        llm_score = float(result.get("score", keyword_score))
+        llm_score = max(0.0, min(1.0, llm_score))
+
+        # 60% LLM + 40% keyword for robustness
+        blended = round(0.6 * llm_score + 0.4 * keyword_score, 3)
+        reasoning = result.get("reasoning", "")
+        blended_feedback = f"{keyword_feedback} | 🤖 LLM score: {llm_score:.2f} ({reasoning[:80]})"
+        breakdown = {**keyword_breakdown, "llm_score": llm_score, "blended_score": blended}
+        return blended, breakdown, blended_feedback
+
+    except Exception as e:
+        # Graceful fallback — keyword grading always works
+        return keyword_score, keyword_breakdown, f"{keyword_feedback} | ⚠️ LLM grader unavailable, using keyword score"
+
+
 # ─── Dispatcher ────────────────────────────────────────────────────────────────
 
-GRADERS = {
-    "easy": grade_overfitting,
+# Map bug_type → grader function (supports multiple tasks per difficulty)
+BUG_TYPE_GRADERS = {
+    "overfitting":             grade_overfitting,
+    "learning_rate_explosion": grade_lr_explosion,
+    "silent_data_poisoning":   grade_data_poisoning,
+    "class_imbalance":         grade_class_imbalance,
+    "catastrophic_forgetting": grade_forgetting,
+}
+
+# Fallback by difficulty if bug_type is missing
+DIFFICULTY_GRADERS = {
+    "easy":   grade_overfitting,
     "medium": grade_lr_explosion,
-    "hard": grade_data_poisoning,
+    "hard":   grade_data_poisoning,
 }
 
 
 def grade(difficulty: str, action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
-    grader = GRADERS.get(difficulty)
+    """
+    Grade a diagnose action. Routes by bug_type for precise grading,
+    falls back to difficulty if bug_type is not present.
+    Applies LLM grading if USE_LLM_GRADING=true.
+    """
+    bug_type = ground_truth.get("bug_type", "")
+    grader = BUG_TYPE_GRADERS.get(bug_type) or DIFFICULTY_GRADERS.get(difficulty)
     if grader is None:
-        raise ValueError(f"Unknown difficulty: {difficulty}")
-    return grader(action_data, ground_truth)
+        raise ValueError(f"No grader found for bug_type='{bug_type}' difficulty='{difficulty}'")
+
+    keyword_score, keyword_breakdown, keyword_feedback = grader(action_data, ground_truth)
+    return llm_grade(action_data, ground_truth, keyword_score, keyword_breakdown, keyword_feedback)
