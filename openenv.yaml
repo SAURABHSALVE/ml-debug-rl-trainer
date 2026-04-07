@@ -1,30 +1,41 @@
 name: ml-experiment-debugger
-version: "4.1.0"
+version: "1.0.0"
 description: >
-  A real-world RL environment where agents debug broken ML training runs by
-  gathering targeted evidence and then submitting a diagnosis and fix.
-  Tasks progress from overfitting to learning-rate instability to silent
-  data poisoning.
+  An RL environment where AI agents diagnose broken ML training runs
+  through multi-step investigation. The agent receives a task description
+  and must CHOOSE which tools to call (fetch_logs, fetch_config,
+  fetch_loss_curve, fetch_class_metrics) to gather evidence — each call
+  costs one step from a limited budget. When ready, agent calls diagnose
+  to submit the root cause and fix. Wrong investigation choices waste
+  budget and lower efficiency score.
+  3 tasks: overfitting (easy), LR explosion (medium), silent data
+  poisoning (hard).
+
 author: AIverse
 difficulty_levels: [easy, medium, hard]
 
 action_space:
   type: structured
   description: >
-    Each action is either an investigation tool call or a terminal diagnose
-    action that ends the current task and receives a graded score.
+    Each step is either an investigation tool call or a terminal diagnose action.
   tools:
     - name: fetch_logs
-      params: [epochs]
+      description: Fetch training log lines for a given epoch range
+      params: [start_epoch, end_epoch]
     - name: fetch_config
+      description: Fetch specific keys from the training config YAML
       params: [keys]
     - name: fetch_loss_curve
+      description: Fetch train or val loss curve data
       params: [split]
-    - name: fetch_diagnostics
-      params: [check]
-    - name: fetch_class_data
+    - name: fetch_gpu_metrics
+      description: Fetch GPU memory and utilization over time
+      params: []
+    - name: fetch_class_metrics
+      description: Fetch per-class accuracy breakdown
       params: [class_id]
     - name: diagnose
+      description: Submit final root cause diagnosis and fix (terminal action per task)
       params: [diagnosis, fix_type, fix_detail, confidence]
       terminal: true
 
@@ -37,44 +48,31 @@ observation_space:
     - step_number
     - max_steps
     - steps_remaining
-    - action_result
+    - tool_result
     - action_history
-    - available_actions
-    - hint
-    - training_logs
-    - config_yaml
-    - loss_curve
-    - gpu_metrics
+    - available_tools
 
 reward:
-  investigation_signal: -0.01 to +0.03
-  diagnose_score: 0.0 to 1.0
-  efficiency_bonus: 0.0 to 0.05
+  tool_call_relevant: +0.02 (small signal for useful investigation step)
+  tool_call_redundant: -0.01 (penalty for repeating same call)
+  diagnose: graded 0.0-1.0 based on correctness of diagnosis and fix
+  efficiency_bonus: +0.05 if correct diagnosis reached in <= half the budget
   trajectory_bonus: +0.05 on hard task if easy>0.7 and medium>0.6
-  notes:
-    - Investigation actions earn small positive rewards when they expose evidence relevant to the hidden bug.
-    - Redundant identical tool calls receive a -0.01 penalty.
-    - Diagnose actions receive deterministic partial credit from task-specific graders.
 
 tasks:
-  - id: overfitting
+  - id: overfitting_detection
     difficulty: easy
     score_range: [0.0, 1.0]
-    max_steps: 15
+    max_steps: 5
+
   - id: lr_explosion
     difficulty: medium
     score_range: [0.0, 1.0]
-    max_steps: 15
-  - id: data_poisoning
+    max_steps: 5
+
+  - id: silent_data_poisoning
     difficulty: hard
     score_range: [0.0, 1.0]
-    max_steps: 15
+    max_steps: 7
 
-api:
-  reset: POST /reset
-  step: POST /step
-  state: GET /state
-  tasks: GET /tasks
-  health: GET /health
-
-tags: [ml-engineering, debugging, reinforcement-learning, tool-use, openenv]
+tags: [ml-engineering, debugging, real-world, multi-step, tool-use, huggingface]

@@ -1,168 +1,184 @@
-import re
-from typing import Dict, Any
-from env.models import Action
+"""
+Graders for all 3 tasks.
+Each grader returns a score in [0.0, 1.0] with a breakdown dict
+and feedback string explaining why points were given or lost.
+"""
+
+from typing import Any, Dict, Tuple
 
 
-def grade_overfitting(action: Action, ground_truth: Dict[str, Any]) -> Dict:
-    score = 0.0
-    diagnosis_score = 0.0
+def _contains_any(text: str, keywords: list) -> bool:
+    text_lower = text.lower()
+    return any(kw.lower() in text_lower for kw in keywords)
+
+
+# ─── Task 1 Grader: Overfitting ────────────────────────────────────────────────
+
+def grade_overfitting(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    diagnosis = (action_data.get("diagnosis") or "").strip()
+    fix_type = (action_data.get("fix_type") or "").strip()
+    fix_detail = (action_data.get("fix_detail") or "").strip()
+
+    breakdown = {}
+    feedback_parts = []
+
+    # 0.5 pts — correctly identifies overfitting
+    diag_keywords = ground_truth["diagnosis_keywords"]
+    if _contains_any(diagnosis, diag_keywords):
+        breakdown["diagnosis"] = 0.5
+        feedback_parts.append("✅ Correctly identified overfitting")
+    else:
+        breakdown["diagnosis"] = 0.0
+        feedback_parts.append("❌ Did not identify overfitting as the root cause")
+
+    # 0.5 pts — valid fix
+    fix_keywords = ground_truth["valid_fix_keywords"]
+    valid_fix_types = ground_truth["valid_fix_types"]
     fix_score = 0.0
-    reasons = []
 
-    # grader receives a diagnose action; reads diagnosis / fix_detail / fix_type
-    diag_lower = (action.diagnosis or "").lower()
-    fix_lower = ((action.fix_detail or "") + " " + (action.fix_type or "")).lower()
+    if fix_type in valid_fix_types:
+        fix_score += 0.2
+    if _contains_any(fix_detail, fix_keywords):
+        fix_score += 0.3
 
-    # Diagnosis (0.0 – 0.5)
-    if "overfit" in diag_lower:
-        diagnosis_score = 0.5
-        reasons.append("✓ Correctly identified overfitting")
-    elif "val" in diag_lower and ("loss" in diag_lower or "accuracy" in diag_lower):
-        diagnosis_score = 0.25
-        reasons.append("⚠ Partial: noticed val metric but didn't name overfitting")
-    elif "generaliz" in diag_lower or "regulariz" in diag_lower:
-        diagnosis_score = 0.3
-        reasons.append("⚠ Partial: related concept, not exact diagnosis")
+    breakdown["fix"] = round(fix_score, 3)
+    if fix_score >= 0.4:
+        feedback_parts.append("✅ Proposed a valid regularization fix")
+    elif fix_score > 0:
+        feedback_parts.append("⚠️ Fix partially correct — be more specific")
+    else:
+        feedback_parts.append("❌ Fix is incorrect or missing")
 
-    # Fix quality (0.0 – 0.5)
-    if any(kw in fix_lower for kw in ["dropout", "weight_decay", "l2"]):
-        fix_score = 0.5
-        reasons.append("✓ Correct fix: regularization")
-    elif "augment" in fix_lower:
-        fix_score = 0.4
-        reasons.append("✓ Valid fix: data augmentation")
-    elif "early stop" in fix_lower:
-        fix_score = 0.35
-        reasons.append("✓ Valid fix: early stopping")
-    elif "dataset" in fix_lower and ("more" in fix_lower or "larger" in fix_lower):
-        fix_score = 0.3
-        reasons.append("⚠ Partial: more data is valid but vague")
-    elif "config_change" in fix_lower:
-        fix_score = 0.1
-        reasons.append("⚠ Correct fix_type but fix_detail insufficient")
-
-    score = diagnosis_score + fix_score
-    return {
-        "score": round(score, 3),
-        "diagnosis_score": diagnosis_score,
-        "fix_score": fix_score,
-        "reasoning": " | ".join(reasons) or "No matching signals found in response",
-    }
+    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    return total, breakdown, " | ".join(feedback_parts)
 
 
-def grade_lr_schedule(action: Action, ground_truth: Dict[str, Any]) -> Dict:
-    diagnosis_score = 0.0
+# ─── Task 2 Grader: LR Explosion ───────────────────────────────────────────────
+
+def grade_lr_explosion(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    diagnosis = (action_data.get("diagnosis") or "").strip()
+    fix_type = (action_data.get("fix_type") or "").strip()
+    fix_detail = (action_data.get("fix_detail") or "").strip()
+
+    breakdown = {}
+    feedback_parts = []
+
+    # 0.5 pts — identifies LR as root cause
+    if _contains_any(diagnosis, ground_truth["diagnosis_keywords"]):
+        breakdown["diagnosis"] = 0.5
+        feedback_parts.append("✅ Identified learning rate / gradient explosion as root cause")
+    else:
+        breakdown["diagnosis"] = 0.0
+        feedback_parts.append("❌ Did not identify learning rate as the problem")
+
+    # 0.5 pts — correct fix
     fix_score = 0.0
-    reasons = []
+    lr_range = ground_truth["valid_lr_range"]
+    fix_keywords = ground_truth["valid_fix_keywords"]
 
-    diag_lower = (action.diagnosis or "").lower()
-    fix_lower = (action.fix_detail or "").lower()
+    if fix_type in ground_truth["valid_fix_types"]:
+        fix_score += 0.1
 
-    # Diagnosis (0.5)
-    if "learning rate" in diag_lower or "lr" in diag_lower:
-        if any(w in diag_lower for w in ["high", "large", "explod", "unstable", "nan", "diverge"]):
-            diagnosis_score = 0.5
-            reasons.append("✓ Correctly identified high LR causing instability")
-        else:
-            diagnosis_score = 0.3
-            reasons.append("⚠ Mentioned LR but missed the 'too high' qualifier")
-    elif "gradient" in diag_lower and "explod" in diag_lower:
-        diagnosis_score = 0.35
-        reasons.append("⚠ Identified gradient explosion (effect, not cause)")
-    elif "nan" in diag_lower or "instab" in diag_lower:
-        diagnosis_score = 0.2
-        reasons.append("⚠ Noticed instability but didn't identify cause")
+    if _contains_any(fix_detail, fix_keywords):
+        fix_score += 0.2
 
-    # Fix: proposed value in correct range? (0.5)
-    numbers = re.findall(r'[\d.e\-]+', fix_lower)
-    low, high = ground_truth["correct_value_range"]
+    # Check if a numeric LR value in valid range is mentioned
+    import re
+    numbers = re.findall(r"[\d]+\.?[\d]*[eE]?[-+]?[\d]*", fix_detail)
     for num_str in numbers:
         try:
             val = float(num_str)
-            if low <= val <= high:
-                fix_score = 0.5
-                reasons.append(f"✓ Proposed valid LR value: {val}")
-                break
-            elif val < low:
-                fix_score = 0.35
-                reasons.append(f"⚠ Proposed LR {val} is in valid direction but too small")
+            if lr_range[0] <= val <= lr_range[1]:
+                fix_score += 0.2
+                feedback_parts.append(f"✅ Suggested LR value {val} is in valid range")
                 break
         except ValueError:
             pass
-
-    if fix_score == 0.0:
-        also_ok = ground_truth.get("also_acceptable", [])
-        if any(k in fix_lower for k in also_ok):
-            fix_score = 0.25
-            reasons.append("⚠ Proposed valid supporting fix (warmup/clip) but missed LR correction")
-
-    score = diagnosis_score + fix_score
-    return {
-        "score": round(score, 3),
-        "diagnosis_score": diagnosis_score,
-        "fix_score": fix_score,
-        "reasoning": " | ".join(reasons) or "No matching signals found",
-    }
-
-
-def grade_data_poisoning(action: Action, ground_truth: Dict[str, Any]) -> Dict:
-    diagnosis_score = 0.0
-    fix_score = 0.0
-    reasons = []
-
-    diag_lower = (action.diagnosis or "").lower()
-    fix_lower = (action.fix_detail or "").lower()
-    fix_type = (action.fix_type or "").lower()
-    target_class = ground_truth["poisoned_class"]
-
-    # Bug type identification (0.3)
-    if any(w in diag_lower for w in ["label", "annotation", "corrupt", "poison", "mislabel"]):
-        diagnosis_score += 0.3
-        reasons.append("✓ Identified data/label quality issue")
-    elif "data" in diag_lower and ("quality" in diag_lower or "issue" in diag_lower):
-        diagnosis_score += 0.15
-        reasons.append("⚠ Generic data issue, not specific enough")
-
-    # Correct class identification (0.2)
-    class_patterns = [f"class_{target_class}", f"class {target_class}", str(target_class)]
-    if any(p in diag_lower or p in fix_lower for p in class_patterns):
-        diagnosis_score += 0.2
-        reasons.append(f"✓ Correctly identified class_{target_class} as affected")
     else:
-        for c in range(5):
-            if c != target_class and (
-                f"class_{c}" in diag_lower or f"class {c}" in diag_lower
-            ):
-                diagnosis_score += 0.05
-                reasons.append(f"✗ Identified wrong class (class_{c})")
-                break
+        if fix_score > 0:
+            fix_score += 0.1  # partial — right direction, no specific value
+            feedback_parts.append("⚠️ Correct direction but no specific LR value given")
 
-    # Fix quality (0.5)
-    if fix_type == "data_fix":
+    breakdown["fix"] = round(min(fix_score, 0.5), 3)
+    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+
+    if breakdown["fix"] >= 0.4:
+        feedback_parts.append("✅ Fix is specific and correct")
+    elif breakdown["fix"] > 0:
+        feedback_parts.append("⚠️ Fix partially correct")
+    else:
+        feedback_parts.append("❌ Fix is incorrect or missing")
+
+    return total, breakdown, " | ".join(feedback_parts)
+
+
+# ─── Task 3 Grader: Silent Data Poisoning ──────────────────────────────────────
+
+def grade_data_poisoning(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    diagnosis = (action_data.get("diagnosis") or "").strip()
+    fix_type = (action_data.get("fix_type") or "").strip()
+    fix_detail = (action_data.get("fix_detail") or "").strip()
+
+    breakdown = {}
+    feedback_parts = []
+    poisoned_class = ground_truth["poisoned_class"]
+
+    # 0.3 pts — identifies data/label corruption as bug type
+    if _contains_any(diagnosis, ground_truth["diagnosis_keywords"]):
+        breakdown["bug_type"] = 0.3
+        feedback_parts.append("✅ Identified label/data corruption as root cause")
+    else:
+        breakdown["bug_type"] = 0.0
+        feedback_parts.append("❌ Did not identify data poisoning / label corruption")
+
+    # 0.2 pts — names the correct poisoned class
+    class_mentioned = (
+        f"class_{poisoned_class}" in diagnosis.lower()
+        or f"class {poisoned_class}" in diagnosis.lower()
+        or str(poisoned_class) in diagnosis
+    )
+    if class_mentioned:
+        breakdown["class_identified"] = 0.2
+        feedback_parts.append(f"✅ Correctly identified class_{poisoned_class} as the poisoned class")
+    else:
+        breakdown["class_identified"] = 0.0
+        feedback_parts.append(f"❌ Did not identify the specific poisoned class (class_{poisoned_class})")
+
+    # 0.5 pts — correct fix
+    fix_keywords = ground_truth["valid_fix_keywords"]
+    fix_score = 0.0
+
+    if fix_type in ground_truth["valid_fix_types"]:
         fix_score += 0.2
-        reasons.append("✓ Correct fix_type: data_fix")
-
-    if any(w in fix_lower for w in ["re-annotate", "reannotate", "relabel", "re-label"]):
+    if _contains_any(fix_detail, fix_keywords):
         fix_score += 0.3
-        reasons.append("✓ Proposed re-annotation as fix")
-    elif any(w in fix_lower for w in ["filter", "remove", "clean", "audit"]):
-        fix_score += 0.25
-        reasons.append("✓ Proposed data filtering/audit")
-    elif "inspect" in fix_lower or "review" in fix_lower:
-        fix_score += 0.15
-        reasons.append("⚠ Proposed inspection — valid but not a concrete fix")
 
-    score = min(1.0, diagnosis_score + fix_score)
-    return {
-        "score": round(score, 3),
-        "diagnosis_score": diagnosis_score,
-        "fix_score": fix_score,
-        "reasoning": " | ".join(reasons) or "No matching signals found",
-    }
+    breakdown["fix"] = round(fix_score, 3)
+    if fix_score >= 0.4:
+        feedback_parts.append("✅ Proposed correct data fix")
+    elif fix_score > 0:
+        feedback_parts.append("⚠️ Fix partially correct")
+    else:
+        feedback_parts.append("❌ Fix is incorrect or missing")
+
+    total = round(
+        breakdown["bug_type"] + breakdown["class_identified"] + breakdown["fix"],
+        3,
+    )
+    return total, breakdown, " | ".join(feedback_parts)
 
 
-GRADER_MAP = {
+# ─── Dispatcher ────────────────────────────────────────────────────────────────
+
+GRADERS = {
     "easy": grade_overfitting,
-    "medium": grade_lr_schedule,
+    "medium": grade_lr_explosion,
     "hard": grade_data_poisoning,
 }
+
+
+def grade(difficulty: str, action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    grader = GRADERS.get(difficulty)
+    if grader is None:
+        raise ValueError(f"Unknown difficulty: {difficulty}")
+    return grader(action_data, ground_truth)

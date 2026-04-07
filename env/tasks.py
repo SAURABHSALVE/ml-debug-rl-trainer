@@ -1,216 +1,260 @@
+"""
+Task generators for the ML Experiment Debugger environment.
+Each task returns a scenario dict with:
+  - description   : what the agent sees at reset
+  - data          : the raw data (logs, config, curves, gpu, class_metrics)
+  - ground_truth  : what the correct answer is (hidden from agent)
+"""
+
 import random
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-
-import numpy as np
-import yaml
-
-@dataclass
-class Task:
-    id: str
-    difficulty: str
-    description: str
-    training_logs: List[str]
-    config_yaml: str
-    loss_curve: Dict[str, List[float]]
-    gpu_metrics: Dict[str, List[float]]
-    ground_truth: Dict[str, Any]   # Hidden from agent, used by grader
+from typing import Any, Dict
 
 
-def _make_overfitting_task(seed: int) -> Task:
-    """Easy: Classic overfitting — train loss drops, val loss rises"""
-    rng = random.Random(seed)
-    epochs = 20
-    noise = lambda: rng.uniform(-0.02, 0.02)
+# ─── Helpers ───────────────────────────────────────────────────────────────────
 
-    train_loss = [2.5 * (0.82 ** i) + noise() for i in range(epochs)]
-    val_loss = [2.5 * (0.85 ** i) + noise() for i in range(10)] + \
-               [val + 0.04 * (i - 9) + noise() for i, val in enumerate(
-                   [2.5 * (0.85 ** 9)] * 10)]
-
-    config = {
-        "model": "resnet50",
-        "lr": 0.001,
-        "epochs": epochs,
-        "batch_size": 32,
-        "dropout": 0.0,          # <-- The bug (no regularization)
-        "weight_decay": 0.0,
-        "dataset_size": 1200,
-    }
-
-    logs = [
-        f"Epoch {i+1}: train_loss={train_loss[i]:.4f}, val_loss={val_loss[i]:.4f}, "
-        f"train_acc={0.6 + i*0.018:.3f}, val_acc={0.58 + i*0.01 if i < 10 else 0.68 - i*0.005:.3f}"
+def _smooth(start: float, end: float, epochs: int, noise: float = 0.0, rng=None) -> list:
+    """Generate a smooth curve from start to end with optional noise."""
+    if rng is None:
+        rng = random
+    step = (end - start) / epochs
+    return [
+        round(start + i * step + rng.uniform(-noise, noise), 4)
         for i in range(epochs)
     ]
 
-    return Task(
-        id=f"overfitting_{seed}",
-        difficulty="easy",
-        description=(
-            "A ResNet-50 was trained for 20 epochs on a small image classification dataset. "
-            "Analyze the training logs and loss curves. Identify what is going wrong "
-            "and suggest a concrete fix."
-        ),
-        training_logs=logs,
-        config_yaml=yaml.dump(config),
-        loss_curve={"train": train_loss, "val": val_loss},
-        gpu_metrics={
-            "memory_mb": [rng.uniform(4800, 5200) for _ in range(epochs)],
-            "util_pct": [rng.uniform(85, 98) for _ in range(epochs)],
-        },
-        ground_truth={
-            "bug_type": "overfitting",
-            "key_signal": "val_loss_divergence",
-            "correct_fix_type": "config_change",
-            "correct_fix_keys": ["dropout", "weight_decay"],
-            "acceptable_fixes": ["dropout > 0", "weight_decay > 0", "data augmentation", "early stopping"],
-        }
-    )
 
+# ─── Task 1: Overfitting (Easy) ────────────────────────────────────────────────
 
-def _make_lr_schedule_task(seed: int) -> Task:
-    """Medium: Learning rate is too high — loss explodes then NaN"""
+def generate_overfitting_task(seed: int = 42) -> Dict[str, Any]:
     rng = random.Random(seed)
-    lr = rng.choice([0.1, 0.5, 1.0])    # Too high
-    epochs = 15
+    epochs = 20
 
-    train_loss = []
-    for i in range(epochs):
-        if i < 5:
-            train_loss.append(2.0 - i * 0.1 + rng.uniform(-0.05, 0.05))
-        elif i < 10:
-            train_loss.append(train_loss[-1] + rng.uniform(0.2, 0.8))  # exploding
-        else:
-            train_loss.append(float('nan'))
-
-    val_loss = [l + rng.uniform(0.1, 0.3) if not np.isnan(l) else float('nan')
-                for l in train_loss]
-
-    config = {
-        "model": "transformer_base",
-        "optimizer": "SGD",
-        "lr": lr,                          # <-- The bug
-        "lr_schedule": "none",
-        "warmup_steps": 0,
-        "gradient_clip": None,
-        "epochs": epochs,
-    }
+    train_loss = _smooth(2.1, 0.05, epochs, noise=0.02, rng=rng)
+    val_loss = _smooth(2.0, 0.45, 10, noise=0.03, rng=rng) + _smooth(0.45, 1.85, 10, noise=0.04, rng=rng)
+    train_acc = _smooth(0.45, 0.99, epochs, noise=0.01, rng=rng)
+    val_acc = _smooth(0.44, 0.81, 10, noise=0.02, rng=rng) + _smooth(0.81, 0.61, 10, noise=0.03, rng=rng)
 
     logs = []
     for i in range(epochs):
-        tl = train_loss[i]
-        if np.isnan(tl):
-            logs.append(f"Epoch {i+1}: train_loss=nan, val_loss=nan, grad_norm=inf — TRAINING UNSTABLE")
-        else:
-            grad_norm = 0.5 + i * 0.4 + rng.uniform(-0.1, 0.1)
-            logs.append(f"Epoch {i+1}: train_loss={tl:.4f}, val_loss={val_loss[i]:.4f}, grad_norm={grad_norm:.3f}")
-
-    return Task(
-        id=f"lr_explosion_{seed}",
-        difficulty="medium",
-        description=(
-            f"A Transformer model is being trained with SGD. Training collapses mid-way. "
-            f"Identify the misconfigured hyperparameter and provide the corrected value."
-        ),
-        training_logs=logs,
-        config_yaml=yaml.dump(config),
-        loss_curve={
-            "train": [0.0 if np.isnan(x) else x for x in train_loss],
-            "val":   [0.0 if np.isnan(x) else x for x in val_loss],
-        },
-        gpu_metrics={
-            "memory_mb": [rng.uniform(6000, 7000) for _ in range(epochs)],
-            "util_pct": [rng.uniform(90, 99) for _ in range(10)] + [5.0] * 5,
-        },
-        ground_truth={
-            "bug_type": "lr_too_high",
-            "buggy_key": "lr",
-            "buggy_value": lr,
-            "correct_fix_type": "config_change",
-            "correct_fix_key": "lr",
-            "correct_value_range": [1e-5, 1e-2],    # Any lr in this range is correct
-            "also_acceptable": ["gradient_clip", "warmup_steps", "lr_schedule"],
-        }
-    )
-
-
-def _make_data_poisoning_task(seed: int) -> Task:
-    """Hard: Silent label corruption in N% of training batch"""
-    rng = random.Random(seed)
-    poison_pct = rng.choice([0.15, 0.20, 0.25])
-    poison_class = rng.randint(0, 4)
-    epochs = 25
-
-    # Poisoned training shows: class-specific accuracy anomaly + slower convergence
-    train_loss = [2.3 * (0.88 ** i) + rng.uniform(-0.03, 0.03) for i in range(epochs)]
-    val_loss   = [2.3 * (0.84 ** i) + rng.uniform(-0.03, 0.03) for i in range(epochs)]
-
-    # Per-class accuracy — poisoned class stays low
-    per_class_acc = {}
-    for c in range(5):
-        if c == poison_class:
-            per_class_acc[f"class_{c}"] = [
-                round(0.35 + rng.uniform(-0.05, 0.05), 3) for _ in range(epochs)
-            ]
-        else:
-            per_class_acc[f"class_{c}"] = [
-                round(min(0.95, 0.4 + i * 0.022 + rng.uniform(-0.02, 0.02)), 3)
-                for i in range(epochs)
-            ]
-
-    config = {
-        "model": "efficientnet_b0",
-        "num_classes": 5,
-        "lr": 0.0003,
-        "epochs": epochs,
-        "batch_size": 64,
-        "dataset": "custom_manufacturing_defects",
-        "data_loader": "standard",
-    }
-
-    logs = []
-    for i in range(epochs):
-        accs = ", ".join(f"c{c}={per_class_acc[f'class_{c}'][i]}" for c in range(5))
         logs.append(
-            f"Epoch {i+1}: train_loss={train_loss[i]:.4f}, val_loss={val_loss[i]:.4f}, "
-            f"per_class_val_acc=[{accs}]"
+            f"Epoch {i+1:02d} | train_loss={train_loss[i]:.4f} "
+            f"train_acc={train_acc[i]:.4f} | "
+            f"val_loss={val_loss[i]:.4f} val_acc={val_acc[i]:.4f}"
         )
-    # Plant a subtle clue mid-training
-    logs[12] += f" [WARNING: label_consistency_check skipped for batch 47]"
 
-    return Task(
-        id=f"data_poisoning_{seed}",
-        difficulty="hard",
-        description=(
-            "An EfficientNet model trained on a 5-class manufacturing defect dataset "
-            "is converging well on global metrics but will fail in production. "
-            "Analyze all available signals — logs, per-class accuracy, config — "
-            "and identify the silent data quality issue. Name the affected class."
+    config = {
+        "model": "ResNet50",
+        "dataset": "CIFAR10_subset_5000",
+        "epochs": 20,
+        "batch_size": 32,
+        "optimizer": "Adam",
+        "lr": 0.001,
+        "dropout": 0.0,
+        "weight_decay": 0.0,
+        "data_augmentation": False,
+        "early_stopping": False,
+    }
+
+    gpu_metrics = {
+        "memory_mb": [rng.randint(3800, 4200) for _ in range(epochs)],
+        "util_pct": [rng.randint(85, 99) for _ in range(epochs)],
+    }
+
+    return {
+        "task_id": f"overfitting_{seed}",
+        "difficulty": "easy",
+        "description": (
+            "A ResNet-50 was trained for 20 epochs on a small image classification dataset. "
+            "Training finished but the deployed model performs poorly on new data. "
+            "Investigate what went wrong and prescribe a fix."
         ),
-        training_logs=logs,
-        config_yaml=yaml.dump(config),
-        loss_curve={"train": train_loss, "val": val_loss, **per_class_acc},
-        gpu_metrics={
-            "memory_mb": [rng.uniform(7500, 8500) for _ in range(epochs)],
-            "util_pct": [rng.uniform(88, 96) for _ in range(epochs)],
+        "data": {
+            "logs": logs,
+            "config": config,
+            "loss_curve": {"train": train_loss, "val": val_loss},
+            "acc_curve": {"train": train_acc, "val": val_acc},
+            "gpu_metrics": gpu_metrics,
+            "class_metrics": {i: round(rng.uniform(0.58, 0.68), 3) for i in range(10)},
         },
-        ground_truth={
-            "bug_type": "label_corruption",
-            "poisoned_class": poison_class,
-            "poison_pct": poison_pct,
-            "correct_fix_type": "data_fix",
-            "correct_fix_detail": f"Re-annotate or filter class_{poison_class} training samples",
-        }
-    )
+        "ground_truth": {
+            "bug_type": "overfitting",
+            "root_cause": "No regularization — dropout=0, weight_decay=0, no augmentation",
+            "affected_config_keys": ["dropout", "weight_decay", "data_augmentation"],
+            "valid_fix_types": ["config_change"],
+            "valid_fix_keywords": ["dropout", "weight_decay", "augmentation", "early_stopping"],
+            "diagnosis_keywords": ["overfit", "overfitting", "regularization", "val loss", "diverge"],
+        },
+    }
 
 
-def generate_tasks(seeds: Optional[List[int]] = None) -> List[Task]:
-    if seeds is None:
-        seeds = [42, 99, 7]
+# ─── Task 2: LR Explosion (Medium) ─────────────────────────────────────────────
 
-    return [
-        _make_overfitting_task(seeds[0]),
-        _make_lr_schedule_task(seeds[1]),
-        _make_data_poisoning_task(seeds[2]),
+def generate_lr_explosion_task(seed: int = 99) -> Dict[str, Any]:
+    rng = random.Random(seed)
+    stable_epochs = 5
+    unstable_epochs = 10
+
+    train_loss_stable = _smooth(2.3, 1.8, stable_epochs, noise=0.03, rng=rng)
+    train_loss_explode = [
+        round(1.8 * (1.6 ** i) + rng.uniform(0, 0.5), 4)
+        for i in range(unstable_epochs)
     ]
+    train_loss_explode[-1] = float("nan")
+    train_loss = train_loss_stable + train_loss_explode
+
+    val_loss = _smooth(2.4, 1.9, stable_epochs, noise=0.04, rng=rng) + [
+        round(min(99.9, 1.9 * (1.7 ** i)), 4) for i in range(unstable_epochs)
+    ]
+
+    grad_norms = [round(rng.uniform(0.8, 1.5), 3) for _ in range(stable_epochs)] + [
+        round(1.5 * (2.1 ** i), 3) for i in range(unstable_epochs)
+    ]
+
+    logs = []
+    for i in range(stable_epochs + unstable_epochs):
+        loss_val = train_loss[i]
+        loss_str = "nan" if loss_val != loss_val else f"{loss_val:.4f}"
+        logs.append(
+            f"Epoch {i+1:02d} | train_loss={loss_str} | "
+            f"grad_norm={grad_norms[i]:.3f} | lr={0.5:.4f}"
+        )
+
+    config = {
+        "model": "TransformerSmall",
+        "dataset": "IMDB_sentiment",
+        "epochs": 15,
+        "batch_size": 64,
+        "optimizer": "SGD",
+        "lr": 0.5,
+        "momentum": 0.9,
+        "lr_scheduler": None,
+        "gradient_clipping": None,
+        "dropout": 0.1,
+        "weight_decay": 1e-4,
+    }
+
+    gpu_metrics = {
+        "memory_mb": [rng.randint(6000, 7000) for _ in range(stable_epochs + unstable_epochs)],
+        "util_pct": [99 if i > stable_epochs else rng.randint(75, 90) for i in range(stable_epochs + unstable_epochs)],
+    }
+
+    return {
+        "task_id": f"lr_explosion_{seed}",
+        "difficulty": "medium",
+        "description": (
+            "A Transformer model was trained on sentiment classification. "
+            "Loss was stable for the first 5 epochs then suddenly exploded and "
+            "produced NaN. Training was automatically stopped. "
+            "Investigate the root cause and prescribe an exact fix with values."
+        ),
+        "data": {
+            "logs": logs,
+            "config": config,
+            "loss_curve": {"train": [x if x == x else 99.9 for x in train_loss], "val": val_loss},
+            "grad_norms": grad_norms,
+            "gpu_metrics": gpu_metrics,
+            "class_metrics": {0: 0.52, 1: 0.49},
+        },
+        "ground_truth": {
+            "bug_type": "learning_rate_explosion",
+            "root_cause": "Learning rate 0.5 is far too high for SGD on transformer — causes gradient explosion",
+            "affected_config_keys": ["lr"],
+            "valid_fix_types": ["config_change"],
+            "valid_fix_keywords": ["learning rate", "lr", "gradient clipping", "scheduler"],
+            "valid_lr_range": (1e-5, 1e-2),
+            "diagnosis_keywords": [
+                "learning rate", "lr", "gradient", "explod", "nan",
+                "instab", "too high", "diverge"
+            ],
+        },
+    }
+
+
+# ─── Task 3: Silent Data Poisoning (Hard) ──────────────────────────────────────
+
+def generate_poisoning_task(seed: int = 7) -> Dict[str, Any]:
+    rng = random.Random(seed)
+    epochs = 25
+    poisoned_class = rng.randint(0, 4)
+
+    train_loss = _smooth(2.4, 0.28, epochs, noise=0.015, rng=rng)
+    val_loss = _smooth(2.3, 0.41, epochs, noise=0.02, rng=rng)
+    train_acc = _smooth(0.42, 0.93, epochs, noise=0.01, rng=rng)
+    val_acc = _smooth(0.40, 0.84, epochs, noise=0.015, rng=rng)
+
+    logs = []
+    for i in range(epochs):
+        line = (
+            f"Epoch {i+1:02d} | train_loss={train_loss[i]:.4f} "
+            f"train_acc={train_acc[i]:.4f} | "
+            f"val_loss={val_loss[i]:.4f} val_acc={val_acc[i]:.4f}"
+        )
+        if i == 13:
+            line += f" | WARNING: label_consistency_check class_{poisoned_class} score=0.61"
+        logs.append(line)
+
+    config = {
+        "model": "EfficientNetB0",
+        "dataset": "manufacturing_defects_5class",
+        "epochs": 25,
+        "batch_size": 32,
+        "optimizer": "AdamW",
+        "lr": 0.0003,
+        "dropout": 0.2,
+        "weight_decay": 1e-4,
+        "data_augmentation": True,
+        "label_smoothing": 0.0,
+    }
+
+    class_metrics = {}
+    for c in range(5):
+        if c == poisoned_class:
+            class_metrics[c] = {
+                "accuracy": round(rng.uniform(0.28, 0.42), 3),
+                "f1": round(rng.uniform(0.22, 0.38), 3),
+                "support": rng.randint(180, 220),
+                "note": f"{rng.randint(15,25)}% of labels may be corrupted",
+            }
+        else:
+            class_metrics[c] = {
+                "accuracy": round(rng.uniform(0.87, 0.95), 3),
+                "f1": round(rng.uniform(0.85, 0.93), 3),
+                "support": rng.randint(180, 220),
+                "note": "healthy",
+            }
+
+    gpu_metrics = {
+        "memory_mb": [rng.randint(4800, 5200) for _ in range(epochs)],
+        "util_pct": [rng.randint(80, 95) for _ in range(epochs)],
+    }
+
+    return {
+        "task_id": f"data_poisoning_{seed}",
+        "difficulty": "hard",
+        "description": (
+            "An EfficientNet-B0 was trained on a 5-class manufacturing defect dataset. "
+            "Overall accuracy looks acceptable at 84% but production clients are "
+            "complaining that the model gives wrong results on their data. "
+            "Investigate deeply — the problem may not be obvious from top-level metrics."
+        ),
+        "data": {
+            "logs": logs,
+            "config": config,
+            "loss_curve": {"train": train_loss, "val": val_loss},
+            "acc_curve": {"train": train_acc, "val": val_acc},
+            "gpu_metrics": gpu_metrics,
+            "class_metrics": class_metrics,
+        },
+        "ground_truth": {
+            "bug_type": "silent_data_poisoning",
+            "root_cause": f"15-25% of labels in class_{poisoned_class} are corrupted",
+            "poisoned_class": poisoned_class,
+            "affected_config_keys": [],
+            "valid_fix_types": ["data_fix"],
+            "valid_fix_keywords": ["label", "corrupt", "annotate", "clean", "audit", "reannotate"],
+            "diagnosis_keywords": [
+                "poison", "corrupt", "label", "class", "per-class",
+                "data", "annotation", f"class_{poisoned_class}", str(poisoned_class)
+            ],
+        },
+    }
