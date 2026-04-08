@@ -1,9 +1,34 @@
+---
+title: ML Experiment Debugger — OpenEnv
+emoji: 🔬
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+pinned: true
+short_description: RL env for AI agents to debug ML training runs
+tags:
+  - reinforcement-learning
+  - ml-engineering
+  - openenv
+  - tool-use
+  - debugging
+  - huggingface
+  - pytorch
+  - hackathon
+license: apache-2.0
+app_port: 7860
+---
+
 # ML Experiment Debugger — OpenEnv Environment
 
 > *Every ML engineer has stared at a broken training run wondering what went wrong.
 > We built an RL environment that teaches AI agents to debug like a senior engineer.*
 
 Built for the **Meta × PyTorch × HuggingFace OpenEnv Hackathon** | Team: **AIverse**
+
+🚀 **Live Demo:** [https://12-vinit-ml-experiment-debugger.hf.space](https://12-vinit-ml-experiment-debugger.hf.space)  
+📖 **API Docs (Swagger):** [https://12-vinit-ml-experiment-debugger.hf.space/docs](https://12-vinit-ml-experiment-debugger.hf.space/docs)  
+🤗 **HuggingFace Space:** [https://huggingface.co/spaces/12-vinit/ml-experiment-debugger](https://huggingface.co/spaces/12-vinit/ml-experiment-debugger)
 
 ---
 

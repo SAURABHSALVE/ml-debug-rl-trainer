@@ -8,10 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import app
-from env.environment import MLDebugEnv
-from env.graders import grade_overfitting, grade_lr_explosion, grade_data_poisoning, grade_class_imbalance, grade_forgetting, grade_nan_init
-from env.models import Action
-from env.tasks import (
+from ml_env.environment import MLDebugEnv
+from ml_env.graders import grade_overfitting, grade_lr_explosion, grade_data_poisoning, grade_class_imbalance, grade_forgetting, grade_nan_init
+from ml_env.models import Action
+from ml_env.tasks import (
     generate_overfitting_task, generate_lr_explosion_task, generate_poisoning_task,
     generate_class_imbalance_task, generate_forgetting_task, generate_nan_init_task,
 )
@@ -244,8 +244,8 @@ class TestAPI:
     def test_step_diagnose(self):
         """Tests that diagnose action returns valid reward structure.
         Uses direct env access to guarantee overfitting easy task."""
-        from env.environment import MLDebugEnv as _Env
-        from env.models import Action as _Action
+        from ml_env.environment import MLDebugEnv as _Env
+        from ml_env.models import Action as _Action
         env = _Env(seed=1)
         env.reset()
         obs, reward, done, info = env.step(_Action(
@@ -292,8 +292,8 @@ class TestAPI:
         """Verify partial credit is given for incomplete but relevant answers.
         Uses a fixed-seed env to guarantee the overfitting easy task is selected.
         """
-        from env.environment import MLDebugEnv as _Env
-        from env.models import Action as _Action
+        from ml_env.environment import MLDebugEnv as _Env
+        from ml_env.models import Action as _Action
         env = _Env(seed=1)
         env.reset()
         _, reward, _, _ = env.step(_Action(

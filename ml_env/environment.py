@@ -21,9 +21,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-from env.graders import grade
-from env.models import Action, Observation, Reward
-from env.tasks import (
+from ml_env.graders import grade
+from ml_env.models import Action, Observation, Reward
+from ml_env.tasks import (
     generate_lr_explosion_task,
     generate_overfitting_task,
     generate_poisoning_task,

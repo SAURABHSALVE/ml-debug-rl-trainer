@@ -18,8 +18,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from env.environment import MLDebugEnv
-from env.models import Action, Observation, Reward
+from ml_env.environment import MLDebugEnv
+from ml_env.models import Action, Observation, Reward
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 

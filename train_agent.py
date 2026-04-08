@@ -13,9 +13,9 @@ from typing import Dict, List
 
 import numpy as np
 
-from env.environment import MLDebugEnv
-from env.models import Action, Observation
-from env.rl_agent import DQNAgent, NON_TERMINAL_ACTIONS
+from ml_env.environment import MLDebugEnv
+from ml_env.models import Action, Observation
+from ml_env.rl_agent import DQNAgent, NON_TERMINAL_ACTIONS
 
 
 INVESTIGATION_DEFAULTS = {
