@@ -1,5 +1,5 @@
 name: ml-experiment-debugger
-version: "2.1.0"
+version: "2.2.0"
 description: >
   An RL environment where AI agents diagnose broken ML training runs
   through multi-step investigation using a tool-use paradigm.
@@ -185,14 +185,14 @@ tasks:
   - id: silent_data_poisoning
     difficulty: hard
     score_range: [0.0, 1.0]
-    max_steps: 8
+    max_steps: 5
     bug_type: silent_data_poisoning
     model: EfficientNet-B0
 
   - id: catastrophic_forgetting
     difficulty: hard
     score_range: [0.0, 1.0]
-    max_steps: 8
+    max_steps: 5
     bug_type: catastrophic_forgetting
     model: ResNet-50 (pretrained)
 

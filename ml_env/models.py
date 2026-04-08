@@ -55,6 +55,7 @@ class Reward(BaseModel):
     total: float = Field(..., ge=-1.0, le=1.0)
     efficiency_bonus: float = Field(default=0.0, ge=0.0, le=0.05)
     trajectory_bonus: float = Field(default=0.0, ge=0.0, le=0.05)
+    path_bonus: float = Field(default=0.0, ge=0.0, le=0.1)
 
 
 class Observation(BaseModel):

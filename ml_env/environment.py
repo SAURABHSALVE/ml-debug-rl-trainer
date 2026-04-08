@@ -49,7 +49,7 @@ AVAILABLE_TOOLS = [
     "diagnose",
 ]
 
-# Which tools give a +0.02 reward signal per bug type (keyed by bug_type for precision)
+# Which tools give a +0.05 reward signal per bug type (keyed by bug_type for precision)
 RELEVANT_TOOLS_BY_BUG = {
     "overfitting":             {"fetch_loss_curve", "fetch_config"},
     "bad_initialization":      {"fetch_logs", "fetch_config"},
@@ -84,7 +84,7 @@ class MLDebugEnv:
         self._scores: Dict[str, float] = {}
 
         # Max steps per task difficulty
-        self._max_steps_map = {"easy": 5, "medium": 6, "hard": 8}
+        self._max_steps_map = {"easy": 5, "medium": 6, "hard": 5}
 
     # ─── Reset ─────────────────────────────────────────────────────────────────
 
@@ -193,13 +193,21 @@ class MLDebugEnv:
                 trajectory_bonus = 0.05
                 feedback += " | 🏆 Trajectory bonus: consistent performance"
 
-        total = round(min(1.0, score + efficiency_bonus + trajectory_bonus), 3)
+        # Investigation path bonus: fetch_class_metrics before diagnosis for class_imbalance
+        path_bonus = 0.0
+        if task.get("ground_truth", {}).get("bug_type") == "class_imbalance":
+            if "fetch_class_metrics" in self._called_tools:
+                path_bonus = 0.1
+                feedback += " | 🔍 Professional path bonus: verified class distribution"
+
+        total = round(min(1.0, score + efficiency_bonus + trajectory_bonus + path_bonus), 3)
         reward = Reward(
             score=score,
             breakdown=breakdown,
             feedback=feedback,
             efficiency_bonus=efficiency_bonus,
             trajectory_bonus=trajectory_bonus,
+            path_bonus=path_bonus,
             total=total,
         )
 
