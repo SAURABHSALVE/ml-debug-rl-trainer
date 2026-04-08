@@ -66,5 +66,10 @@ class Observation(BaseModel):
     max_steps: int = Field(..., ge=1)
     steps_remaining: int = Field(..., ge=0)
     tool_result: Optional[Dict[str, Any]] = None
+    loss_curve: Optional[Dict[str, Any]] = None
+    class_metrics: Optional[Dict[str, Any]] = None
+    logs: Optional[List[str]] = None
+    config: Optional[Dict[str, Any]] = None
+    gpu_metrics: Optional[Dict[str, Any]] = None
     action_history: List[str] = Field(default_factory=list)
     available_tools: List[str] = Field(default_factory=list)

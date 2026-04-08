@@ -28,10 +28,10 @@ No existing OpenEnv environment covers ML training diagnostics. This fills a dir
 |---|---|
 | Action Space | Structured (investigation tool calls + terminal diagnose) |
 | Observation Space | Structured (task description, tool results, step counter) |
-| **Task Pool** | **5 distinct scenarios across 3 difficulty levels** |
+| **Task Pool** | **6 distinct scenarios across 3 difficulty levels** |
 | Tasks per Episode | 3 (1 easy + 1 medium + 1 hard, randomly sampled from pool) |
 | Reward Type | Partial credit, float in [0.0, 1.0] |
-| Max Steps | 5 (easy), 6 (medium), 8 (hard) |
+| Max Steps | 5 (easy), 6 (medium), 5 (hard) |
 | Grading | Keyword grader + optional LLM grader (blended 60/40) |
 | Efficiency Bonus | +0.05 if correct diagnosis in ≤ half budget |
 | Trajectory Bonus | +0.05 on hard if easy>0.7 AND medium>0.6 |
@@ -39,27 +39,18 @@ No existing OpenEnv environment covers ML training diagnostics. This fills a dir
 
 ---
 
-## Task Catalogue (5 Scenarios)
+## Task Catalogue (6 Scenarios)
 
-### Task 1 — Overfitting Detection `[easy]`
-**Scenario:** ResNet-50 trained 20 epochs on a small dataset. Train accuracy reaches 99% while val accuracy peaks at 81% then drops to 61%. Zero regularization in config.
+### Task 1 — Catastrophic Forgetting `[hard]`
+**Scenario:** ResNet-50 pretrained on ImageNet is fine-tuned on satellite imagery. New task accuracy reaches 91%. But after deployment, the original ImageNet classification capability drops from 92% to under 15%. `freeze_backbone=False` and `lr=0.01` destroys pretrained representations.
 
-**Grader:** 0.5 pts for identifying overfitting · 0.5 pts for valid regularization fix (dropout/weight_decay/augmentation)
+**Grader:** 0.5 pts for identifying catastrophic forgetting · 0.5 pts for proposing EWC / backbone freeze / replay buffer
 
-**Baseline scores:** GPT-4o: ~0.85 | Llama-3.3-70B: ~0.85 | Llama-3-8B: ~0.45
-
----
-
-### Task 2 — Learning Rate Explosion `[medium]`
-**Scenario:** Transformer trained with SGD at LR=0.5. Loss stable for 5 epochs then explodes, gradient norms grow >100 by epoch 8, produces NaN.
-
-**Grader:** 0.5 pts for naming LR/gradient explosion · 0.5 pts for proposing valid LR in [1e-5, 1e-2]
-
-**Baseline scores:** GPT-4o: ~0.75 | Llama-3.3-70B: ~0.80 | Llama-3-8B: ~0.35
+**Baseline scores:** GPT-4o: ~0.65 | Llama-3.3-70B: ~0.55 | Llama-3-8B: ~0.15
 
 ---
 
-### Task 3 — Class Imbalance `[medium]`
+### Task 2 — Class Imbalance `[medium]`
 **Scenario:** MobileNetV2 on a 4-class medical X-ray dataset. Overall accuracy=93% looks excellent. But one class has 9500 samples while others have ~150-200. The model never predicts minority classes.
 
 **Grader:** 0.5 pts for identifying class imbalance · 0.5 pts for proposing weighted loss / oversampling / SMOTE
@@ -68,7 +59,7 @@ No existing OpenEnv environment covers ML training diagnostics. This fills a dir
 
 ---
 
-### Task 4 — Silent Data Poisoning `[hard]`
+### Task 3 — Silent Data Poisoning `[hard]`
 **Scenario:** EfficientNet-B0 on a 5-class manufacturing defect dataset. Overall accuracy=84% looks fine. But 15-25% of one class has corrupted labels. That class stagnates at ~35% while others reach 90%+. A generic anomaly warning appears in logs at epoch 13 — but doesn't name the class.
 
 **Grader:** 0.3 pts for identifying label/data corruption · 0.2 pts for naming the correct class · 0.5 pts for data_fix proposal
@@ -77,12 +68,30 @@ No existing OpenEnv environment covers ML training diagnostics. This fills a dir
 
 ---
 
-### Task 5 — Catastrophic Forgetting `[hard]`
-**Scenario:** ResNet-50 pretrained on ImageNet is fine-tuned on satellite imagery. New task accuracy reaches 91%. But after deployment, the original ImageNet classification capability drops from 92% to under 15%. `freeze_backbone=False` and `lr=0.01` destroys pretrained representations.
+### Task 4 — Learning Rate Explosion `[medium]`
+**Scenario:** Transformer trained with SGD at LR=0.5. Loss stable for 5 epochs then explodes, gradient norms grow >100 by epoch 8, produces NaN.
 
-**Grader:** 0.5 pts for identifying catastrophic forgetting · 0.5 pts for proposing EWC / backbone freeze / replay buffer
+**Grader:** 0.5 pts for naming LR/gradient explosion · 0.5 pts for proposing valid LR in [1e-5, 1e-2]
 
-**Baseline scores:** GPT-4o: ~0.65 | Llama-3.3-70B: ~0.55 | Llama-3-8B: ~0.15
+**Baseline scores:** GPT-4o: ~0.75 | Llama-3.3-70B: ~0.80 | Llama-3-8B: ~0.35
+
+---
+
+### Task 5 — Overfitting Detection `[easy]`
+**Scenario:** ResNet-50 trained 20 epochs on a small dataset. Train accuracy reaches 99% while val accuracy peaks at 81% then drops to 61%. Zero regularization in config.
+
+**Grader:** 0.5 pts for identifying overfitting · 0.5 pts for valid regularization fix 
+
+**Baseline scores:** GPT-4o: ~0.85 | Llama-3.3-70B: ~0.85 | Llama-3-8B: ~0.45
+
+---
+
+### Task 6 — Bad Initialization `[easy]`
+**Scenario:** Custom CNN model implemented from scratch. Loss returns NaN immediately on the first batch. `torch.nn.init.normal_(m.weight, mean=0, std=10.0)` is observed.
+
+**Grader:** 0.5 pts for identifying bad initialization · 0.5 pts for proposing valid initialization scheme like Xavier/Kaiming
+
+**Baseline scores:** GPT-4o: ~0.85 | Llama-3.3-70B: ~0.85 | Llama-3-8B: ~0.40
 
 ---
 

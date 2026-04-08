@@ -93,13 +93,13 @@ tasks:
   - id: silent_data_poisoning
     difficulty: hard
     score_range: [0.0, 1.0]
-    max_steps: 8
+    max_steps: 5
     pool_slot: hard
 
   - id: catastrophic_forgetting
     difficulty: hard
     score_range: [0.0, 1.0]
-    max_steps: 8
+    max_steps: 5
     pool_slot: hard
 
 episode:

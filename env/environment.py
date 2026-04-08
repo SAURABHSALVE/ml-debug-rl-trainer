@@ -84,7 +84,7 @@ class MLDebugEnv:
         self._scores: Dict[str, float] = {}
 
         # Max steps per task difficulty
-        self._max_steps_map = {"easy": 5, "medium": 6, "hard": 8}
+        self._max_steps_map = {"easy": 5, "medium": 6, "hard": 5}
 
     # ─── Reset ─────────────────────────────────────────────────────────────────
 
@@ -127,6 +127,11 @@ class MLDebugEnv:
             max_steps=max_steps,
             steps_remaining=max_steps,
             tool_result=None,
+            loss_curve={"train": [], "val": []},
+            class_metrics={},
+            logs=[],
+            config={},
+            gpu_metrics={"memory_mb": [], "util_pct": []},
             action_history=[],
             available_tools=AVAILABLE_TOOLS,
         )
@@ -178,9 +183,35 @@ class MLDebugEnv:
         }
         score, breakdown, feedback = grade(difficulty, action_data, task["ground_truth"])
 
+        # ✅ FIX: Priority 1 - Reward investigation path
+        bug_type = task.get("ground_truth", {}).get("bug_type", "")
+        relevant_set = RELEVANT_TOOLS_BY_BUG.get(bug_type) or RELEVANT_TOOLS.get(difficulty, set())
+        relevant_called = set([t for t in self._called_tools if t in relevant_set])
+
+        if len(relevant_set) > 0:
+            investigation_ratio = len(relevant_called) / len(relevant_set)
+        else:
+            investigation_ratio = 1.0
+
+        # Scale diagnosis score to max 0.5, give up to 0.5 for proper investigation
+        base_score = score
+        investigation_score = round(investigation_ratio * 0.5, 3)
+        scaled_diagnosis_score = round(base_score * 0.5, 3)
+
+        score = scaled_diagnosis_score + investigation_score
+        breakdown["investigation_score"] = investigation_score
+        breakdown["diagnosis_scaled"] = scaled_diagnosis_score
+
+        if investigation_ratio == 0:
+            feedback += f" | ❌ Guess penalty: no relevant tools used (investigation=0.0)"
+        elif investigation_ratio < 1.0:
+            feedback += f" | ⚠️ Partial investigation: missed some key evidence (investigation={investigation_score})"
+        else:
+            feedback += f" | 🔍 Full investigation score (investigation={investigation_score})"
+
         # Efficiency bonus: got it right within half the budget
         efficiency_bonus = 0.0
-        if score >= 0.8 and self._task_step <= max_steps // 2 + 1:
+        if base_score >= 0.8 and self._task_step <= max_steps // 2 + 1:
             efficiency_bonus = 0.05
             feedback += " | ⚡ Efficiency bonus: solved in few steps"
 
@@ -230,13 +261,12 @@ class MLDebugEnv:
         # ✅ FIX 1: Check repeat BEFORE appending
         if tool in self._called_tools:
             # Don't append again — return immediately
-            return {"result": "Already called this tool. No new information."}, -0.05
+            return {"result": "Already called this tool. No new information."}, -0.01
 
         # ✅ FIX 2: Append only on success
         self._called_tools.append(tool)
         
-        # ✅ Better penalty (0.05 vs 0.02 positive) means agent thinks twice
-        intermediate_reward = 0.05 if tool in relevant else 0.0
+        intermediate_reward = 0.02 if tool in relevant else 0.0
 
         if tool == "fetch_logs":
             # Validate inputs
@@ -295,6 +325,14 @@ class MLDebugEnv:
     def _make_obs(self, task: Dict, tool_result: Optional[Dict]) -> Observation:
         difficulty = task["difficulty"]
         max_steps = self._max_steps_map[difficulty]
+        
+        # Pull these from tool_result if they exist so the frontend can read them directly
+        loss_curve = tool_result.get("loss_curve", {"train": [], "val": []}) if tool_result else {"train": [], "val": []}
+        class_metrics = tool_result.get("class_metrics", {}) if tool_result else {}
+        logs = tool_result.get("logs", []) if tool_result else []
+        config = tool_result.get("config", {}) if tool_result else {}
+        gpu_metrics = tool_result.get("gpu_metrics", {"memory_mb": [], "util_pct": []}) if tool_result else {"memory_mb": [], "util_pct": []}
+
         return Observation(
             task_id=task["task_id"],
             difficulty=difficulty,
@@ -303,6 +341,11 @@ class MLDebugEnv:
             max_steps=max_steps,
             steps_remaining=max(0, max_steps - self._task_step),
             tool_result=tool_result,
+            loss_curve=loss_curve,
+            class_metrics=class_metrics,
+            logs=logs,
+            config=config,
+            gpu_metrics=gpu_metrics,
             action_history=list(self._action_history),
             available_tools=AVAILABLE_TOOLS,
         )

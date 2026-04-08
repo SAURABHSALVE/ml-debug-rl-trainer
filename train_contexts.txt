@@ -1,0 +1,2 @@
+fig_yaml:n,loss_curve:i,gpu_metrics:a}=e,o={train:i.train,val:i.val},u=Object.entries(i).filter(([l])=>l!==
+---
