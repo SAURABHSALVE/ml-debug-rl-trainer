@@ -93,23 +93,31 @@ async def general_error_handler(request: Request, exc: Exception):
 
 @app.post(
     "/reset",
-    response_model=Observation,
     summary="Reset episode — start a new episode with 3 randomly selected tasks",
     tags=["core"],
 )
-def reset() -> Observation:
+def reset() -> Dict[str, Any]:
     """
     Start a new episode. Picks **1 easy + 1 medium + 1 hard** task from the 6-task pool.
 
-    Returns the first task's **Observation** — the agent sees only the task description
-    and must call investigation tools to gather evidence before diagnosing.
+    Returns the first task observation wrapped in a standard result dict.
     """
     try:
         obs = env.reset()
         logger.info(
             f"Episode reset | tasks: {[t['task_id'] for t in env._tasks]}"
         )
-        return obs
+        return {
+            "observation": obs.model_dump(),
+            "reward": {
+                "score": 0.0,
+                "breakdown": {},
+                "feedback": "Episode reset success",
+                "total": 0.0
+            },
+            "done": False,
+            "info": {"task_index": 0}
+        }
     except Exception as e:
         logger.error(f"Reset failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Reset failed: {e}")
@@ -221,7 +229,7 @@ def health() -> Dict[str, str]:
 
 api_router = APIRouter(prefix="/api")
 
-@api_router.post("/reset", response_model=Observation, summary="Reset episode")
+@api_router.post("/reset", summary="Reset episode")
 def api_reset():
     return reset()
 
