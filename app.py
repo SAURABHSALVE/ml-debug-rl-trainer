@@ -14,9 +14,10 @@ import logging
 from datetime import datetime
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from ml_env.environment import MLDebugEnv
 from ml_env.models import Action, Observation, Reward
@@ -217,6 +218,32 @@ def health() -> Dict[str, str]:
         "episode_active": str(env._current_task is not None),
     }
 
+# ─── APIRouter for Frontend ──────────────────────────────────────────────────
+
+api_router = APIRouter(prefix="/api")
+
+@api_router.post("/reset", response_model=Observation, summary="Reset episode")
+def api_reset():
+    return reset()
+
+@api_router.post("/step", summary="Submit investigation tool call or diagnose")
+def api_step(action: Action):
+    return step(action)
+
+@api_router.get("/state", summary="Get current episode state")
+def api_state():
+    return state()
+
+@api_router.get("/tasks", summary="List all 3 tasks in current episode")
+def api_list_tasks():
+    return list_tasks()
+
+@api_router.get("/health", summary="Health check")
+def api_health():
+    return health()
+
+app.include_router(api_router)
+
 
 # ─── Startup / Shutdown ────────────────────────────────────────────────────────
 
@@ -228,3 +255,6 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     logger.info("ML Experiment Debugger shutting down")
+
+# Mount the frontend UI (must be at the end to not shadow API routes)
+app.mount("/", StaticFiles(directory="ui/dist", html=True), name="ui")

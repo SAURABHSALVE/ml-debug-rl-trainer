@@ -189,12 +189,16 @@ tasks:
     score_range: [0.0, 1.0]
     bug_type: silent_data_poisoning
     model: EfficientNet-B0
+    max_steps: 5
+    pool_slot: hard
 
   - id: catastrophic_forgetting
     difficulty: hard
     score_range: [0.0, 1.0]
     bug_type: catastrophic_forgetting
     model: ResNet-50 (pretrained)
+    max_steps: 5
+    pool_slot: hard
 
 episode:
   tasks_per_episode: 3
