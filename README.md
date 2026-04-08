@@ -24,10 +24,9 @@ license: apache-2.0
 app_port: 7860
 ---
 
-# ML Experiment Debugger — OpenEnv Environment
+# 🔬 ML Experiment Debugger — OpenEnv
 
-> *Every ML engineer has stared at a broken training run wondering what went wrong.
-> We built an RL environment that teaches AI agents to debug like a senior engineer.*
+> *"Every ML engineer has stared at a broken training run wondering why. We built an environment that teaches AI agents to investigate like a Senior MLE."*
 
 Built for the **Meta × PyTorch × HuggingFace OpenEnv Hackathon** | Team: **AIverse**
 
@@ -37,119 +36,79 @@ Built for the **Meta × PyTorch × HuggingFace OpenEnv Hackathon** | Team: **AIv
 
 ---
 
-## 🎯 Why This Exists
+## 🎯 The Vision
+Modern LLM agents are good at coding, but struggle with **system-level diagnosis**. The ML Experiment Debugger is a professional-grade Reinforcement Learning environment where agents must diagnose 6 distinct, realistic ML failure modes. 
 
-ML training failures cost real money and time:
-- A model silently overfits and the product team only finds out after launch.
-- A hospital's X-ray classifier reaches 93% accuracy — but never catches disease in minority classes.
-- A fine-tuned model destroys its pretrained capabilities overnight (catastrophic forgetting).
-
-This environment **formalizes the ML debugging process** into a structured, gradable RL task:
-- Agent starts with **only a natural-language task description**.
-- Must **choose which tools to call** from a limited step budget.
-- Must navigate **misleading signals** (e.g., high accuracy masking imbalance).
-- Must identify the **root cause** and prescribe an **actionable fix**.
-- Is graded on **diagnosis correctness** + **fix quality** + **investigation efficiency**.
+Unlike "toy" environments, this benchmark forces agents to manage a **global step budget**, verify hypotheses through **tool usage**, and avoid **redundant investigation**.
 
 ---
 
-## 🧩 Environment Overview
+## 🧩 Technical Specifications
 
-| Property            | Value |
-|---|---|
-| **Action Space**    | Structured (5 investigation tool calls + 1 terminal diagnose) |
-| **Observation**     | Structured (task description, tool result, step counter, history) |
-| **Task Pool**       | **6 unique scenarios across 3 difficulty levels** |
-| **Tasks/Episode**   | 3 (1 easy + 1 medium + 1 hard, randomly sampled) |
-| **Reward**          | Float in [0.0, 1.0] per task — partial credit available |
-| **Max Steps**       | 5 (easy), 6 (medium), 8 (hard) |
-| **Grading**         | Keyword grader (always) + optional LLM grader (blended 60/40) |
-| **Efficiency Bonus**| +0.05 if correct diagnosis within half the step budget |
-| **Trajectory Bonus**| +0.05 on hard task if easy > 0.7 AND medium > 0.6 |
-| **Deployment**      | HuggingFace Spaces (port 7860), Docker-ready |
+| Feature | Specification |
+|:--- |:--- |
+| **Action Space** | Structured investigation (5 tools) + 1 Terminal `diagnose` |
+| **Observation** | High-fidelity data: Logs, Loss Curves, Class Metrics, Configs |
+| **Step Budget** | **16 Global Steps** (Episodic) |
+| **Difficulty Brackets** | **Easy, Medium, Hard** (1 of each per episode) |
+| **Reward Function** | Multi-tiered (Investigation + Diagnosis + Bonuses) |
+| **Compliance** | **100% OpenEnv Spec** (Pydantic models + YAML schema) |
+| **Grading** | Blended (60% LLM Judge + 40% Keyword Match) |
 
 ---
 
-## 📋 Task Catalogue (6 Scenarios)
+## 📋 The 6-Bug Catalogue
 
-### Task 1 — Data Leakage `[easy]`
-**Scenario:** XGBoost trained on tabular customer data. Accuracy is 100% on both train and val. Investigation reveals a feature `last_purchase_date` is identical to the target `churn_date` in many samples.
+The environment randomly samples 3 tasks (one from each bracket) to test generalizability across diverse ML domains.
 
-### Task 2 — NaN from Bad Initialization `[easy]`
-**Scenario:** BERT-small custom model. Training loss is NaN from epoch 1. GPU utilization is near 0%. Config contains an extreme `init_std=10.0`.
+### 🟢 Easy Bracket
+1.  **Data Leakage (Tabular/XGBoost)**: A feature `last_purchase_date` is a direct proxy for the target. Accuracy is 100% — too good to be true.
+2.  **NaN Initialization (NLP/BERT)**: Extreme initialization scale (`std=10.0`) crashes gradients instantly.
 
-### Task 3 — FP16 Underflow `[medium]`
-**Scenario:** Llama-3-8B LoRA fine-tuning in fp16. Gradients are mostly 0, loss is stagnant. Investigation reveals no gradient scaler was used, causing underflow to zero.
+### 🟡 Medium Bracket
+3.  **FP16 Underflow (LLM/Llama-3)**: LoRA fine-tuning without a gradient scaler. Gradients underflow to zero; loss stays stagnant.
+4.  **Class Imbalance (CV/MobileNet)**: High accuracy (93%) masks a catastrophic failure to predict minority classes (9500 vs 200 samples).
 
-### Task 4 — Class Imbalance `[medium]`
-**Scenario:** MobileNetV2 on medical X-rays. Overall accuracy is 93%. However, one class has 9,500 samples while others have <200. The model never predicts minority classes (recall ~2%).
-
-### Task 5 — Silent Data Poisoning `[hard]`
-**Scenario:** EfficientNet-B0 on manufacturing defect data. 15-25% of one class has corrupted labels. That class stagnates at ~30% accuracy while others reach 90%+.
-
-### Task 6 — Catastrophic Forgetting `[hard]`
-**Scenario:** Fine-tuned ResNet-50. New task accuracy 91%, but original ImageNet capability dropped from 92% to 15% because `freeze_backbone=False` and `lr=0.01` were used.
+### 🔴 Hard Bracket
+5.  **Silent Data Poisoning (CV/EfficientNet)**: Sub-tle label corruption (15-25%) in a specific manufacturing class causes it to never cross 30% accuracy.
+6.  **Catastrophic Forgetting (CV/ResNet)**: Fine-tuning a pretrained model with an aggressive LR and unfrozen backbone destroys original capability.
 
 ---
 
-## 🛠️ Action Space
+## 🏆 Sophisticated Reward Modeling
+The reward system incentivizes professional investigative behavior, not just lucky guessing.
 
-**Investigation tools** (cost 1 step each):
-```json
-{"action_type": "fetch_logs",         "start_epoch": 1, "end_epoch": 10}
-{"action_type": "fetch_config",       "keys": ["lr", "optimizer", "dropout"]}
-{"action_type": "fetch_loss_curve",   "split": "val"}
-{"action_type": "fetch_gpu_metrics"}
-{"action_type": "fetch_class_metrics","class_id": 2}
-```
-
-**Terminal action** (triggers grading):
-```json
-{
-  "action_type": "diagnose",
-  "diagnosis":   "The model is overfitting — val loss diverges after epoch 10",
-  "fix_type":    "config_change",
-  "fix_detail":  "Add dropout=0.3 and weight_decay=1e-4",
-  "confidence":  0.9
-}
-```
+- **Investigation Score (0.5 max)**: Score scaled by the ratio of relevant tools identified vs. the total tools required for that bug type.
+- **Diagnosis Score (0.5 max)**: LLM or Keyword assessment of the correctness of the root cause and fix.
+- **⚡ Efficiency Bonus (+0.05)**: Awarded for a high-accuracy solution in ≤ 3 steps per task.
+- **🏆 Trajectory Bonus (+0.05)**: Awarded on the Hard task only if the agent maintained high performance (>0.7) on earlier Easy and Medium tasks.
+- **🔍 Professional Path Bonus (+0.1)**: Awarded for specific expert sequences (e.g., checking class distribution *before* diagnosing imbalance).
+- **🚫 Spam Penalty (-0.01)**: Deducted for every redundant tool call already made.
 
 ---
 
-## 👁️ Observation Space
+## ⚙️ Fast Setup
 
-```json
-{
-  "task_id":         "class_imbalance_55",
-  "difficulty":      "medium",
-  "description":     "A MobileNetV2 was trained on a medical X-ray dataset...",
-  "step_number":     2,
-  "max_steps":       6,
-  "tool_result":     {"class_metrics": {"0": {"support": 9500}, "1": {"support": 167}}},
-  "action_history":  ["fetch_loss_curve", "fetch_class_metrics"]
-}
-```
-
----
-
-## 🤖 Grading System
-
-| Mode | How | When Active |
-|---|---|---|
-| **Keyword** (default) | Deterministic string-matching | Always on |
-| **LLM** (optional) | Llama-3.3-70B-Instruct as judge | `USE_LLM_GRADING=true` |
-
-*Blended score: 60% LLM + 40% Keyword for nuanced evaluation.*
-
----
-
-## 🚀 Setup
-
+### Local Run
 ```bash
 pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 7860
 ```
 
+### Docker
+```bash
+docker build -t ml-debug-env .
+docker run -p 7860:7860 ml-debug-env
+```
+
 ---
 
-*Built with ❤️ by Team AIverse for the Meta × PyTorch × HuggingFace OpenEnv Hackathon*
+## 🛠️ OpenEnv API Interface
+The environment exposes standard endpoints:
+- `POST /reset`: Start 3-task episode.
+- `POST /step`: call investigation tools or `diagnose`.
+- `GET /state`: Deep introspection into episode progress.
+- `GET /tasks`: Details on current tasks.
+
+---
+*Built with ❤️ for the Meta OpenEnv Hackathon 2026*
