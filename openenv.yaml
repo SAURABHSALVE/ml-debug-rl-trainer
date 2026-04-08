@@ -1,23 +1,34 @@
 name: ml-experiment-debugger
-version: "1.1.0"
+version: "2.0.0"
 description: >
   An RL environment where AI agents diagnose broken ML training runs
-  through multi-step investigation. The agent receives a task description
-  and must CHOOSE which tools to call (fetch_logs, fetch_config,
-  fetch_loss_curve, fetch_class_metrics) to gather evidence — each call
-  costs one step from a limited budget. When ready, agent calls diagnose
-  to submit the root cause and fix. Wrong investigation choices waste
-  budget and lower efficiency score.
+  through multi-step investigation using a tool-use paradigm.
 
-  5 tasks across 3 difficulty levels (3 randomly sampled per episode):
-  - overfitting_detection (easy)
-  - lr_explosion (medium)
-  - class_imbalance (medium)
-  - silent_data_poisoning (hard)
-  - catastrophic_forgetting (hard)
+  The agent receives only a natural-language task description. It must
+  CHOOSE which investigation tools to call from a limited step budget —
+  each call costs one step and returns real evidence (training logs,
+  config YAML, loss curves, GPU metrics, per-class metrics).
+  When confident, the agent calls `diagnose` to submit its root cause
+  and fix proposal. It is graded on diagnosis correctness, fix quality,
+  and investigation efficiency.
 
-  Grading: keyword-based (always) + optional LLM grader (USE_LLM_GRADING=true)
-  with 60/40 blending for reproducibility + reasoning quality.
+  Task pool — 6 unique scenarios across 3 difficulty levels:
+    EASY:
+      1. overfitting_detection  — ResNet-50 overfits small dataset; val loss diverges
+      2. nan_init               — BERT custom model; init_std=10 causes NaN from epoch 1
+    MEDIUM:
+      3. lr_explosion           — Transformer with SGD lr=0.5; loss explodes to NaN
+      4. class_imbalance        — MobileNetV2 on medical X-rays; 95% majority class
+    HARD:
+      5. silent_data_poisoning  — EfficientNet-B0; 15-25% of one class has corrupt labels
+      6. catastrophic_forgetting — ResNet-50 fine-tun destroys pretrained representations
+
+  Grading:
+    - Keyword grader (always active): deterministic, reproducible
+    - LLM grader (optional): Llama-3.3-70B-Instruct via HuggingFace router
+    - When USE_LLM_GRADING=true: blended 60% LLM + 40% keyword for richer scoring
+
+  Deployment: HuggingFace Spaces (port 7860), Docker-ready
 
 author: AIverse
 difficulty_levels: [easy, medium, hard]
@@ -25,85 +36,207 @@ difficulty_levels: [easy, medium, hard]
 action_space:
   type: structured
   description: >
-    Each step is either an investigation tool call or a terminal diagnose action.
+    Each step is either an investigation tool call (non-terminal)
+    or a terminal diagnose action.
   tools:
     - name: fetch_logs
-      description: Fetch training log lines for a given epoch range
-      params: [start_epoch, end_epoch]
+      description: Retrieve training log lines for a given epoch range
+      params:
+        - name: start_epoch
+          type: int
+          required: false
+          default: 1
+        - name: end_epoch
+          type: int
+          required: false
+          default: last epoch
+      example: {"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 10}
+
     - name: fetch_config
-      description: Fetch specific keys from the training config YAML
-      params: [keys]
+      description: Retrieve specific keys from the training config YAML
+      params:
+        - name: keys
+          type: list[str]
+          required: false
+          default: all keys
+      example: {"action_type": "fetch_config", "keys": ["lr", "optimizer", "dropout"]}
+
     - name: fetch_loss_curve
-      description: Fetch train or val loss curve data
-      params: [split]
+      description: Retrieve train or val loss curve data
+      params:
+        - name: split
+          type: str
+          required: false
+          enum: [train, val]
+          default: all
+      example: {"action_type": "fetch_loss_curve", "split": "val"}
+
     - name: fetch_gpu_metrics
-      description: Fetch GPU memory and utilization over time
+      description: Retrieve GPU memory and utilization over all epochs
       params: []
+      example: {"action_type": "fetch_gpu_metrics"}
+
     - name: fetch_class_metrics
-      description: Fetch per-class accuracy breakdown for a specific class
-      params: [class_id]
+      description: Retrieve per-class accuracy, F1, and support for a specific class
+      params:
+        - name: class_id
+          type: int
+          required: false
+          description: 0-9; omit to return all classes
+      example: {"action_type": "fetch_class_metrics", "class_id": 2}
+
     - name: diagnose
-      description: Submit final root cause diagnosis and fix (terminal action per task)
-      params: [diagnosis, fix_type, fix_detail, confidence]
+      description: Submit final root cause diagnosis and fix (terminal action — ends current task)
+      params:
+        - name: diagnosis
+          type: str
+          required: true
+        - name: fix_type
+          type: str
+          required: true
+          enum: [config_change, data_fix, architecture_change]
+        - name: fix_detail
+          type: str
+          required: true
+        - name: confidence
+          type: float
+          required: false
+          range: [0.0, 1.0]
       terminal: true
+      example: >
+        {"action_type": "diagnose", "diagnosis": "LR 0.5 is too high...",
+         "fix_type": "config_change", "fix_detail": "reduce lr to 0.001", "confidence": 0.9}
 
 observation_space:
   type: structured
   fields:
-    - task_id
-    - difficulty
-    - description
-    - step_number
-    - max_steps
-    - steps_remaining
-    - tool_result
-    - action_history
-    - available_tools
+    - name: task_id
+      type: str
+    - name: difficulty
+      type: str
+      enum: [easy, medium, hard]
+    - name: description
+      type: str
+      description: Natural-language task description (only info agent starts with)
+    - name: step_number
+      type: int
+    - name: max_steps
+      type: int
+    - name: steps_remaining
+      type: int
+    - name: tool_result
+      type: dict | null
+      description: Result of the last tool call; null on first step
+    - name: action_history
+      type: list[str]
+      description: Names of tools called so far this task
+    - name: available_tools
+      type: list[str]
 
 reward:
-  tool_call_relevant: 0.02
-  tool_call_redundant: -0.01
+  investigation_relevant: 0.05
+  investigation_irrelevant: 0.0
+  investigation_redundant: -0.05
   diagnose_score_range: [0.0, 1.0]
-  efficiency_bonus: 0.05
-  trajectory_bonus: 0.05
+  efficiency_bonus:
+    trigger: score >= 0.8 AND steps_used <= max_steps // 2 + 1
+    value: 0.05
+  trajectory_bonus:
+    trigger: difficulty=hard AND easy_score > 0.7 AND medium_score > 0.6
+    value: 0.05
   grading_modes:
-    keyword: always_active
-    llm_blended: optional_USE_LLM_GRADING_env_var
-    blend_ratio: "60% LLM + 40% keyword"
+    keyword:
+      description: Deterministic string-matching grader, always active
+      always_on: true
+    llm_blended:
+      description: Llama-3.3-70B-Instruct as judge, blended 60/40 with keyword
+      activation: USE_LLM_GRADING=true + HF_TOKEN set
+      blend: "60% LLM + 40% keyword"
 
-tasks:
+task_pool:
   - id: overfitting_detection
     difficulty: easy
     score_range: [0.0, 1.0]
     max_steps: 5
-    pool_slot: easy
+    bug_type: overfitting
+    model: ResNet-50
+
+  - id: nan_init
+    difficulty: easy
+    score_range: [0.0, 1.0]
+    max_steps: 5
+    bug_type: bad_initialization
+    model: BERT-small-custom
 
   - id: lr_explosion
     difficulty: medium
     score_range: [0.0, 1.0]
     max_steps: 6
-    pool_slot: medium
+    bug_type: learning_rate_explosion
+    model: TransformerSmall
 
   - id: class_imbalance
     difficulty: medium
     score_range: [0.0, 1.0]
     max_steps: 6
-    pool_slot: medium
+    bug_type: class_imbalance
+    model: MobileNetV2
 
   - id: silent_data_poisoning
     difficulty: hard
     score_range: [0.0, 1.0]
     max_steps: 8
-    pool_slot: hard
+    bug_type: silent_data_poisoning
+    model: EfficientNet-B0
 
   - id: catastrophic_forgetting
     difficulty: hard
     score_range: [0.0, 1.0]
     max_steps: 8
-    pool_slot: hard
+    bug_type: catastrophic_forgetting
+    model: ResNet-50 (pretrained)
 
 episode:
   tasks_per_episode: 3
-  selection: "1 from each difficulty pool (random, seeded)"
+  selection: "1 randomly sampled from each difficulty pool — seeded for reproducibility"
 
-tags: [ml-engineering, debugging, real-world, multi-step, tool-use, huggingface, llm-grading, class-imbalance, catastrophic-forgetting]
+api_endpoints:
+  - method: POST
+    path: /reset
+    description: Start new episode — returns first task Observation
+  - method: POST
+    path: /step
+    description: Submit investigation tool or diagnose action
+  - method: GET
+    path: /state
+    description: Current episode state, scores, tools called
+  - method: GET
+    path: /tasks
+    description: List all 3 tasks in the current episode
+  - method: GET
+    path: /health
+    description: Health check
+  - method: GET
+    path: /docs
+    description: Swagger UI
+
+deployment:
+  platform: HuggingFace Spaces
+  port: 7860
+  docker: true
+  base_image: python:3.11-slim
+
+tags:
+  - ml-engineering
+  - debugging
+  - multi-step
+  - tool-use
+  - real-world
+  - huggingface
+  - llm-grading
+  - class-imbalance
+  - catastrophic-forgetting
+  - data-poisoning
+  - reward-shaping
+  - efficiency-bonus
+  - trajectory-bonus
