@@ -5,7 +5,7 @@ colorFrom: indigo
 colorTo: purple
 sdk: docker
 pinned: true
-short_description: "Multi-step RL env (OpenEnv spec) — AI agents diagnose 6 real ML bugs: data leakage, FP16 underflow, class imbalance, catastrophic forgetting & more"
+short_description: "RL env — AI agents diagnose 6 real ML bugs (OpenEnv spec)"
 tags:
   - reinforcement-learning
   - openenv
