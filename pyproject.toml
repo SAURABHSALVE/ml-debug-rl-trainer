@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ml-experiment-debugger"
+version = "2.3.0"
+description = "RL environment where AI agents diagnose 6 real ML bugs."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.6",
+    "pydantic>=2.7.4",
+    "openai>=1.40.0",
+    "numpy>=1.24.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+    "openenv-core>=0.2.0"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0"
+]
+
+[project.scripts]
+server = "server.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ml_env", "server"]
