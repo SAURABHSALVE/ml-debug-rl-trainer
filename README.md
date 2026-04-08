@@ -5,16 +5,21 @@ colorFrom: indigo
 colorTo: purple
 sdk: docker
 pinned: true
-short_description: RL env for AI agents to debug ML training runs
+short_description: "Multi-step RL env (OpenEnv spec) — AI agents diagnose 6 real ML bugs: data leakage, FP16 underflow, class imbalance, catastrophic forgetting & more"
 tags:
   - reinforcement-learning
-  - ml-engineering
   - openenv
+  - ml-engineering
   - tool-use
   - debugging
   - huggingface
   - pytorch
   - hackathon
+  - fastapi
+  - rl-environment
+  - meta-hackathon
+  - llm-grading
+  - reward-shaping
 license: apache-2.0
 app_port: 7860
 ---
