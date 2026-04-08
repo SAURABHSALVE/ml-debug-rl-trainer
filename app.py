@@ -16,7 +16,7 @@ from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from ml_env.environment import MLDebugEnv
 from ml_env.models import Action, Observation, Reward
@@ -62,6 +62,12 @@ app.add_middleware(
 
 # Global environment instance (stateful, one per server process)
 env = MLDebugEnv()
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Redirect home to API documentation."""
+    return RedirectResponse(url="/docs")
 
 # ─── Error Handlers ────────────────────────────────────────────────────────────
 
