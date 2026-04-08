@@ -92,17 +92,37 @@ This fills a direct gap in the ML ops benchmarking space.
 
 The environment randomly samples 3 tasks (one from each bracket) to test generalizability across diverse ML domains.
 
-### 🟢 Easy Bracket
-1.  **Data Leakage (Tabular/XGBoost)**: A feature `last_purchase_date` is a direct proxy for the target. Accuracy is 100% — too good to be true.
-2.  **NaN Initialization (NLP/BERT)**: Extreme initialization scale (`std=10.0`) crashes gradients instantly.
+```mermaid
+graph TD
+    classDef easy fill:#e6fffa,stroke:#38b2ac,stroke-width:2px,color:#1d4ed8;
+    classDef medium fill:#fffff0,stroke:#ecc94b,stroke-width:2px,color:#92400e;
+    classDef hard fill:#fff5f5,stroke:#fc8181,stroke-width:2px,color:#991b1b;
+    classDef root fill:#f3f4f6,stroke:#6b7280,stroke-width:3px,color:#1f2937;
 
-### 🟡 Medium Bracket
-3.  **FP16 Underflow (LLM/Llama-3)**: LoRA fine-tuning without a gradient scaler. Gradients underflow to zero; loss stays stagnant.
-4.  **Class Imbalance (CV/MobileNet)**: High accuracy (93%) masks a catastrophic failure to predict minority classes (9500 vs 200 samples).
+    Catalogue["📋 The 6-Bug Catalogue"]:::root
 
-### 🔴 Hard Bracket
-5.  **Silent Data Poisoning (CV/EfficientNet)**: Sub-tle label corruption (15-25%) in a specific manufacturing class causes it to never cross 30% accuracy.
-6.  **Catastrophic Forgetting (CV/ResNet)**: Fine-tuning a pretrained model with an aggressive LR and unfrozen backbone destroys original capability.
+    Easy["🟢 Easy Bracket"]:::easy
+    Medium["🟡 Medium Bracket"]:::medium
+    Hard["🔴 Hard Bracket"]:::hard
+
+    Catalogue --> Easy
+    Catalogue --> Medium
+    Catalogue --> Hard
+
+    T1["1. Data Leakage (Tabular/XGBoost)<br/>100% accuracy via direct proxy"]:::easy
+    T2["2. NaN Initialization (NLP/BERT)<br/>Extreme initialization crashes gradients"]:::easy
+    T3["3. FP16 Underflow (LLM/Llama-3)<br/>LoRA without gradient scaler stalls training"]:::medium
+    T4["4. Class Imbalance (CV/MobileNet)<br/>93% Accuracy masks silent minority class failure"]:::medium
+    T5["5. Silent Data Poisoning (CV/EfficientNet)<br/>Corrupted labels stall specific class at 30%"]:::hard
+    T6["6. Catastrophic Forgetting (CV/ResNet)<br/>Fine-tuning destroys pretrained capability"]:::hard
+
+    Easy --> T1
+    Easy --> T2
+    Medium --> T3
+    Medium --> T4
+    Hard --> T5
+    Hard --> T6
+```
 
 ---
 
