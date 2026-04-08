@@ -17,7 +17,6 @@ from typing import Any, Dict
 from fastapi import FastAPI, HTTPException, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 from ml_env.environment import MLDebugEnv
 from ml_env.models import Action, Observation, Reward
@@ -256,5 +255,4 @@ async def startup():
 async def shutdown():
     logger.info("ML Experiment Debugger shutting down")
 
-# Mount the frontend UI (must be at the end to not shadow API routes)
-app.mount("/", StaticFiles(directory="ui/dist", html=True), name="ui")
+# Note: Root "/" is handled by the redirect above (line ~71) → /docs
