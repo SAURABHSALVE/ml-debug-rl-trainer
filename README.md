@@ -26,11 +26,9 @@ app_port: 7860
 
 # 🔬 ML Experiment Debugger — OpenEnv
 
-> **A structured RL benchmark for training AI agents to diagnose broken machine learning training runs.**
+> *"Every ML engineer has stared at a broken training run wondering why. We built an environment that teaches AI agents to investigate like a Senior MLE."*
 
-An RL environment where frontier AI models (GPT-4o, Llama-70B) analyze failed ML experiments and prescribe fixes. Given training logs, loss curves, configs, and GPU metrics — can your agent identify the root cause?
-
-**Built for OpenEnv Hackathon | Team: AIverse**
+Built for the **Meta × PyTorch × HuggingFace OpenEnv Hackathon** | Team: **AIverse**
 
 🚀 **Live Demo:** [https://12-vinit-ml-experiment-debugger.hf.space](https://12-vinit-ml-experiment-debugger.hf.space)  
 📖 **API Docs (Swagger):** [https://12-vinit-ml-experiment-debugger.hf.space/docs](https://12-vinit-ml-experiment-debugger.hf.space/docs)  
@@ -38,39 +36,10 @@ An RL environment where frontier AI models (GPT-4o, Llama-70B) analyze failed ML
 
 ---
 
-## Problem: The Debug Bottleneck
+## 🎯 The Vision
+Modern LLM agents are good at coding, but struggle with **system-level diagnosis**. The ML Experiment Debugger is a professional-grade Reinforcement Learning environment where agents must diagnose 6 distinct, realistic ML failure modes. 
 
-Every ML engineer has stared at a loss curve wondering:
-- **Why is validation loss diverging?** (overfitting? bad data? wrong hyperparams?)
-- **Why did loss explode suddenly?** (learning rate too high? gradient explosion?)
-- **Why is one class failing silently?** (label corruption? data imbalance?)
-
-**Current reality:** Debugging is manual, slow, and requires deep expertise.
-No ML engineer wants to train models just to debug other models.
-
-**This environment solves it:** Formalizes diagnostic reasoning into a graded, benchmarkable task.
-
-## Why Now? (OpenEnv + Hackathon Fit)
-
-✅ **First of its kind:** No existing OpenEnv environment covers ML training diagnostics  
-✅ **Directly useful:** HuggingFace & Meta engineers ship training infra daily  
-✅ **Benchmarkable:** Structured grading allows fair model comparison  
-✅ **Extensible:** Easy to add new failure modes, datasets, model architectures  
-
-This fills a direct gap in the ML ops benchmarking space.
-
----
-
-## Key Features
-
-| Feature | Benefit |
-|---------|---------|
-| **3 Escalating Tasks** | Easy (overfitting) → Medium (LR tuning) → Hard (data poisoning) |
-| **Partial Credit Grading** | Models get points for right direction, not just perfect answers |
-| **Realistic Scenarios** | Based on actual ML training failures engineers encounter |
-| **Structured Actions** | Agents propose: diagnosis + fix_type + fix_detail + confidence |
-| **Production-Ready** | Docker, tests, FastAPI, deployable to HF Spaces in <5 min |
-| **Baseline Evals** | GPT-4o: 72%, Llama-70B: 52% (shows room for agent training) |
+Unlike "toy" environments, this benchmark forces agents to manage a **global step budget**, verify hypotheses through **tool usage**, and avoid **redundant investigation**.
 
 ---
 
@@ -92,37 +61,17 @@ This fills a direct gap in the ML ops benchmarking space.
 
 The environment randomly samples 3 tasks (one from each bracket) to test generalizability across diverse ML domains.
 
-```mermaid
-graph TD
-    classDef easy fill:#e6fffa,stroke:#38b2ac,stroke-width:2px,color:#1d4ed8;
-    classDef medium fill:#fffff0,stroke:#ecc94b,stroke-width:2px,color:#92400e;
-    classDef hard fill:#fff5f5,stroke:#fc8181,stroke-width:2px,color:#991b1b;
-    classDef root fill:#f3f4f6,stroke:#6b7280,stroke-width:3px,color:#1f2937;
+### 🟢 Easy Bracket
+1.  **Data Leakage (Tabular/XGBoost)**: A feature `last_purchase_date` is a direct proxy for the target. Accuracy is 100% — too good to be true.
+2.  **NaN Initialization (NLP/BERT)**: Extreme initialization scale (`std=10.0`) crashes gradients instantly.
 
-    Catalogue["📋 The 6-Bug Catalogue"]:::root
+### 🟡 Medium Bracket
+3.  **FP16 Underflow (LLM/Llama-3)**: LoRA fine-tuning without a gradient scaler. Gradients underflow to zero; loss stays stagnant.
+4.  **Class Imbalance (CV/MobileNet)**: High accuracy (93%) masks a catastrophic failure to predict minority classes (9500 vs 200 samples).
 
-    Easy["🟢 Easy Bracket"]:::easy
-    Medium["🟡 Medium Bracket"]:::medium
-    Hard["🔴 Hard Bracket"]:::hard
-
-    Catalogue --> Easy
-    Catalogue --> Medium
-    Catalogue --> Hard
-
-    T1["1. Data Leakage (Tabular/XGBoost)<br/>100% accuracy via direct proxy"]:::easy
-    T2["2. NaN Initialization (NLP/BERT)<br/>Extreme initialization crashes gradients"]:::easy
-    T3["3. FP16 Underflow (LLM/Llama-3)<br/>LoRA without gradient scaler stalls training"]:::medium
-    T4["4. Class Imbalance (CV/MobileNet)<br/>93% Accuracy masks silent minority class failure"]:::medium
-    T5["5. Silent Data Poisoning (CV/EfficientNet)<br/>Corrupted labels stall specific class at 30%"]:::hard
-    T6["6. Catastrophic Forgetting (CV/ResNet)<br/>Fine-tuning destroys pretrained capability"]:::hard
-
-    Easy --> T1
-    Easy --> T2
-    Medium --> T3
-    Medium --> T4
-    Hard --> T5
-    Hard --> T6
-```
+### 🔴 Hard Bracket
+5.  **Silent Data Poisoning (CV/EfficientNet)**: Sub-tle label corruption (15-25%) in a specific manufacturing class causes it to never cross 30% accuracy.
+6.  **Catastrophic Forgetting (CV/ResNet)**: Fine-tuning a pretrained model with an aggressive LR and unfrozen backbone destroys original capability.
 
 ---
 
@@ -138,20 +87,18 @@ The reward system incentivizes professional investigative behavior, not just luc
 
 ---
 
-## Quick Start (30 seconds)
+## ⚙️ Fast Setup
 
-### Docker (Recommended)
+### Local Run
+```bash
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 7860
+```
+
+### Docker
 ```bash
 docker build -t ml-debug-env .
 docker run -p 7860:7860 ml-debug-env
-
-# Visit http://localhost:7860/docs for interactive API
-```
-
-### Local Development
-```bash
-pip install -r requirements.txt
-uvicorn server.app:app --host 0.0.0.0 --port 7860
 ```
 
 ---
