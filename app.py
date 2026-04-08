@@ -47,7 +47,7 @@ app = FastAPI(
         "**Reward:** 0.0–1.0 per task (diagnosis correctness + fix quality + efficiency bonus)\n"
         "**Task pool:** 6 scenarios across 3 difficulty levels; 3 selected randomly per episode."
     ),
-    version="2.0.0",
+    version="2.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
@@ -212,7 +212,7 @@ def health() -> Dict[str, str]:
     """Returns `ok` if the server is running correctly."""
     return {
         "status": "ok",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "episode_active": str(env._current_task is not None),
     }
@@ -222,7 +222,7 @@ def health() -> Dict[str, str]:
 
 @app.on_event("startup")
 async def startup():
-    logger.info("ML Experiment Debugger v2.0.0 starting up — OpenEnv compatible")
+    logger.info("ML Experiment Debugger v2.1.0 starting up — OpenEnv compatible")
 
 
 @app.on_event("shutdown")

@@ -1,5 +1,5 @@
 name: ml-experiment-debugger
-version: "2.0.0"
+version: "2.1.0"
 description: >
   An RL environment where AI agents diagnose broken ML training runs
   through multi-step investigation using a tool-use paradigm.
@@ -125,7 +125,7 @@ observation_space:
     - name: steps_remaining
       type: int
     - name: tool_result
-      type: dict | null
+      type: object
       description: Result of the last tool call; null on first step
     - name: action_history
       type: list[str]
@@ -153,7 +153,7 @@ reward:
       activation: USE_LLM_GRADING=true + HF_TOKEN set
       blend: "60% LLM + 40% keyword"
 
-task_pool:
+tasks:
   - id: overfitting_detection
     difficulty: easy
     score_range: [0.0, 1.0]
