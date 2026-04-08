@@ -11,8 +11,8 @@ intermediate_signal is a small reward (−0.01 – 0.03):
 import re
 import yaml
 from typing import Set, Tuple, List, Optional
-from env.models import Action
-from env.tasks import Task
+from ml_env.models import Action
+from ml_env.tasks import Task
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

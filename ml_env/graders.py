@@ -18,9 +18,9 @@ def _contains_any(text: str, keywords: list) -> bool:
     return any(kw.lower() in text_lower for kw in keywords)
 
 
-# ─── Task 1 Grader: Overfitting ────────────────────────────────────────────────
+# ─── Task 1 Grader: Data Leakage ────────────────────────────────────────────────
 
-def grade_overfitting(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+def grade_data_leakage(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
     diagnosis = (action_data.get("diagnosis") or "").strip()
     fix_type = (action_data.get("fix_type") or "").strip()
     fix_detail = (action_data.get("fix_detail") or "").strip()
@@ -28,14 +28,14 @@ def grade_overfitting(action_data: Dict[str, Any], ground_truth: Dict[str, Any])
     breakdown = {}
     feedback_parts = []
 
-    # 0.5 pts — correctly identifies overfitting
+    # 0.5 pts — correctly identifies data leakage
     diag_keywords = ground_truth["diagnosis_keywords"]
     if _contains_any(diagnosis, diag_keywords):
         breakdown["diagnosis"] = 0.5
-        feedback_parts.append("✅ Correctly identified overfitting")
+        feedback_parts.append("✅ Correctly identified data leakage / target leak")
     else:
         breakdown["diagnosis"] = 0.0
-        feedback_parts.append("❌ Did not identify overfitting as the root cause")
+        feedback_parts.append("❌ Did not identify data leakage as the root cause")
 
     # 0.5 pts — valid fix
     fix_keywords = ground_truth["valid_fix_keywords"]
@@ -49,9 +49,9 @@ def grade_overfitting(action_data: Dict[str, Any], ground_truth: Dict[str, Any])
 
     breakdown["fix"] = round(fix_score, 3)
     if fix_score >= 0.4:
-        feedback_parts.append("✅ Proposed a valid regularization fix")
+        feedback_parts.append("✅ Proposed valid fix to remove leaking feature")
     elif fix_score > 0:
-        feedback_parts.append("⚠️ Fix partially correct — be more specific")
+        feedback_parts.append("⚠️ Fix partially correct — be more specific about which feature")
     else:
         feedback_parts.append("❌ Fix is incorrect or missing")
 
@@ -59,9 +59,9 @@ def grade_overfitting(action_data: Dict[str, Any], ground_truth: Dict[str, Any])
     return total, breakdown, " | ".join(feedback_parts)
 
 
-# ─── Task 2 Grader: LR Explosion ───────────────────────────────────────────────
+# ─── Task 2 Grader: FP16 Underflow ───────────────────────────────────────────────
 
-def grade_lr_explosion(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+def grade_fp16_underflow(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
     diagnosis = (action_data.get("diagnosis") or "").strip()
     fix_type = (action_data.get("fix_type") or "").strip()
     fix_detail = (action_data.get("fix_detail") or "").strip()
@@ -69,47 +69,29 @@ def grade_lr_explosion(action_data: Dict[str, Any], ground_truth: Dict[str, Any]
     breakdown = {}
     feedback_parts = []
 
-    # 0.5 pts — identifies LR as root cause
+    # 0.5 pts — identifies FP16 underflow or missing scaler
     if _contains_any(diagnosis, ground_truth["diagnosis_keywords"]):
         breakdown["diagnosis"] = 0.5
-        feedback_parts.append("✅ Identified learning rate / gradient explosion as root cause")
+        feedback_parts.append("✅ Identified fp16 underflow or missing gradient scaler")
     else:
         breakdown["diagnosis"] = 0.0
-        feedback_parts.append("❌ Did not identify learning rate as the problem")
+        feedback_parts.append("❌ Did not identify precision/underflow issue")
 
     # 0.5 pts — correct fix
     fix_score = 0.0
-    lr_range = ground_truth["valid_lr_range"]
     fix_keywords = ground_truth["valid_fix_keywords"]
 
     if fix_type in ground_truth["valid_fix_types"]:
-        fix_score += 0.1
-
-    if _contains_any(fix_detail, fix_keywords):
         fix_score += 0.2
 
-    # Check if a numeric LR value in valid range is mentioned
-    import re
-    numbers = re.findall(r"[\d]+\.?[\d]*[eE]?[-+]?[\d]*", fix_detail)
-    for num_str in numbers:
-        try:
-            val = float(num_str)
-            if lr_range[0] <= val <= lr_range[1]:
-                fix_score += 0.2
-                feedback_parts.append(f"✅ Suggested LR value {val} is in valid range")
-                break
-        except ValueError:
-            pass
-    else:
-        if fix_score > 0:
-            fix_score += 0.1  # partial — right direction, no specific value
-            feedback_parts.append("⚠️ Correct direction but no specific LR value given")
+    if _contains_any(fix_detail, fix_keywords):
+        fix_score += 0.3
 
-    breakdown["fix"] = round(min(fix_score, 0.5), 3)
+    breakdown["fix"] = round(fix_score, 3)
     total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
 
     if breakdown["fix"] >= 0.4:
-        feedback_parts.append("✅ Fix is specific and correct")
+        feedback_parts.append("✅ Fix is specific and correct (scaler or bf16)")
     elif breakdown["fix"] > 0:
         feedback_parts.append("⚠️ Fix partially correct")
     else:
@@ -441,9 +423,9 @@ def _parse_llm_response(raw: str) -> Tuple[float | None, str]:
 
 # Map bug_type → grader function (supports multiple tasks per difficulty)
 BUG_TYPE_GRADERS = {
-    "overfitting":             grade_overfitting,
+    "data_leakage":            grade_data_leakage,
     "bad_initialization":      grade_nan_init,
-    "learning_rate_explosion": grade_lr_explosion,
+    "fp16_underflow":          grade_fp16_underflow,
     "silent_data_poisoning":   grade_data_poisoning,
     "class_imbalance":         grade_class_imbalance,
     "catastrophic_forgetting": grade_forgetting,
@@ -451,8 +433,8 @@ BUG_TYPE_GRADERS = {
 
 # Fallback by difficulty if bug_type is missing
 DIFFICULTY_GRADERS = {
-    "easy":   grade_overfitting,
-    "medium": grade_lr_explosion,
+    "easy":   grade_data_leakage,
+    "medium": grade_fp16_underflow,
     "hard":   grade_data_poisoning,
 }
 

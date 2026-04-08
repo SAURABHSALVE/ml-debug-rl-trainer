@@ -8,11 +8,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import app
-from env.environment import MLDebugEnv
-from env.graders import grade_overfitting, grade_lr_explosion, grade_data_poisoning, grade_class_imbalance, grade_forgetting, grade_nan_init
-from env.models import Action
-from env.tasks import (
-    generate_overfitting_task, generate_lr_explosion_task, generate_poisoning_task,
+from ml_env.environment import MLDebugEnv
+from ml_env.graders import grade_data_leakage, grade_fp16_underflow, grade_data_poisoning, grade_class_imbalance, grade_forgetting, grade_nan_init
+from ml_env.models import Action
+from ml_env.tasks import (
+    generate_data_leakage_task, generate_fp16_underflow_task, generate_poisoning_task,
     generate_class_imbalance_task, generate_forgetting_task, generate_nan_init_task,
 )
 
@@ -21,64 +21,64 @@ client = TestClient(app)
 
 # ─── Grader Tests ──────────────────────────────────────────────────────────────
 
-class TestOverfittingGrader:
+class TestDataLeakageGrader:
     def setup_method(self):
-        self.gt = generate_overfitting_task(42)["ground_truth"]
+        self.gt = generate_data_leakage_task(42)["ground_truth"]
 
     def test_perfect_score(self):
         action = {
-            "diagnosis": "The model is overfitting — train loss keeps dropping but val loss diverges after epoch 10",
+            "diagnosis": "The target variable latest_churn_flag is leaked into the training features",
             "fix_type": "config_change",
-            "fix_detail": "Add dropout=0.3 and weight_decay=1e-4 to prevent overfitting",
+            "fix_detail": "Remove latest_churn_flag from features_used list",
             "confidence": 0.95,
         }
-        score, breakdown, feedback = grade_overfitting(action, self.gt)
+        score, breakdown, feedback = grade_data_leakage(action, self.gt)
         assert score >= 0.8, f"Expected >=0.8, got {score}"
         assert breakdown["diagnosis"] == 0.5
 
     def test_partial_score_wrong_fix(self):
         action = {
-            "diagnosis": "The model is overfitting badly",
+            "diagnosis": "There is a massive data leak causing perfect precision",
             "fix_type": "wrong_type",
             "fix_detail": "Change something",
             "confidence": 0.5,
         }
-        score, _, _ = grade_overfitting(action, self.gt)
+        score, _, _ = grade_data_leakage(action, self.gt)
         assert 0.3 <= score < 0.8
 
     def test_zero_score(self):
         action = {
-            "diagnosis": "The GPU ran out of memory",
+            "diagnosis": "The model is overfitting",
             "fix_type": "architecture_change",
-            "fix_detail": "Use a smaller model",
+            "fix_detail": "Add dropout",
             "confidence": 0.3,
         }
-        score, _, _ = grade_overfitting(action, self.gt)
+        score, _, _ = grade_data_leakage(action, self.gt)
         assert score < 0.4
 
 
-class TestLRExplosionGrader:
+class TestFP16UnderflowGrader:
     def setup_method(self):
-        self.gt = generate_lr_explosion_task(99)["ground_truth"]
+        self.gt = generate_fp16_underflow_task(99)["ground_truth"]
 
     def test_perfect_score(self):
         action = {
-            "diagnosis": "Learning rate 0.5 is too high for SGD — causing gradient explosion and NaN loss",
+            "diagnosis": "Using fp16 precision without gradient scaling causes underflow to exactly 0",
             "fix_type": "config_change",
-            "fix_detail": "Reduce learning rate from 0.5 to 0.001 and add gradient clipping",
+            "fix_detail": "Enable grad_scaler=True or switch precision to bf16",
             "confidence": 0.9,
         }
-        score, _, _ = grade_lr_explosion(action, self.gt)
+        score, _, _ = grade_fp16_underflow(action, self.gt)
         assert score >= 0.8
 
-    def test_lr_value_in_range(self):
+    def test_val_in_range(self):
         action = {
-            "diagnosis": "The learning rate is exploding causing NaN",
+            "diagnosis": "The gradients are zero because of fp16 underflow",
             "fix_type": "config_change",
-            "fix_detail": "Set lr=0.0005",
+            "fix_detail": "Add a scaler to prevent zero gradients",
             "confidence": 0.8,
         }
-        score, breakdown, _ = grade_lr_explosion(action, self.gt)
+        score, breakdown, _ = grade_fp16_underflow(action, self.gt)
         assert breakdown["diagnosis"] == 0.5
         assert score >= 0.7
 
@@ -86,10 +86,10 @@ class TestLRExplosionGrader:
         action = {
             "diagnosis": "The model has too many parameters — reduce layers",
             "fix_type": "architecture_change",
-            "fix_detail": "Use smaller model",
+            "fix_detail": "Use a smaller model",
             "confidence": 0.4,
         }
-        score, _, _ = grade_lr_explosion(action, self.gt)
+        score, _, _ = grade_fp16_underflow(action, self.gt)
         assert score < 0.3
 
 
@@ -152,7 +152,7 @@ class TestEnvironment:
         assert obs.tool_result is not None
         assert "loss_curve" in obs.tool_result or "val_loss" in obs.tool_result
         assert done is False
-        assert obs.steps_remaining == 4  # 5 - 1
+        assert obs.steps_remaining == 15  # 16 - 1
 
     def test_redundant_tool_penalized(self):
         env = MLDebugEnv()
@@ -167,11 +167,13 @@ class TestEnvironment:
         env.reset()
         action = Action(
             action_type="diagnose",
-            diagnosis="The model is overfitting — val loss diverges",
+            diagnosis="The target leaked into the features",
             fix_type="config_change",
-            fix_detail="Add dropout=0.3",
+            fix_detail="Remove leakage column",
             confidence=0.9,
         )
+        # Avoid guessing penalty during tests
+        env._called_tools = ["fetch_config"]
         obs, reward, done, info = env.step(action)
         assert done is False  # Not done — 2 more tasks
         assert obs.difficulty == "medium"  # Moved to task 2
@@ -179,23 +181,27 @@ class TestEnvironment:
     def test_full_episode(self):
         env = MLDebugEnv()
         env.reset()
+        # Mock tool calls to avoid Guessing Penalty in tests
+        env._called_tools = ["fetch_config", "fetch_loss_curve"]
+
         diagnose_easy = Action(
             action_type="diagnose",
-            diagnosis="overfitting detected — val loss diverges",
+            diagnosis="data leakage detected",
             fix_type="config_change",
-            fix_detail="Add dropout=0.3 weight_decay=1e-4",
+            fix_detail="remove target column",
             confidence=0.9,
         )
         # Task 1 — easy
         _, _, done, _ = env.step(diagnose_easy)
         assert not done
 
+        env._called_tools = ["fetch_logs", "fetch_config"]
         # Task 2 — medium
         _, _, done, _ = env.step(Action(
             action_type="diagnose",
-            diagnosis="learning rate 0.5 too high causing gradient explosion nan",
+            diagnosis="fp16 underflow to zero",
             fix_type="config_change",
-            fix_detail="reduce lr to 0.001",
+            fix_detail="enable grad_scaler",
             confidence=0.9,
         ))
         assert not done
@@ -243,20 +249,21 @@ class TestAPI:
 
     def test_step_diagnose(self):
         """Tests that diagnose action returns valid reward structure.
-        Uses direct env access to guarantee overfitting easy task."""
-        from env.environment import MLDebugEnv as _Env
-        from env.models import Action as _Action
+        Uses direct env access to guarantee easy task."""
+        from ml_env.environment import MLDebugEnv as _Env
+        from ml_env.models import Action as _Action
         env = _Env(seed=1)
         env.reset()
+        env._called_tools = ["fetch_config"] # Avoid guessing penalty
         obs, reward, done, info = env.step(_Action(
             action_type="diagnose",
-            diagnosis="The model is overfitting — val loss diverges significantly",
+            diagnosis="data leakage detected",
             fix_type="config_change",
-            fix_detail="Add dropout=0.3 and weight_decay=1e-4",
+            fix_detail="remove latest_churn_flag",
             confidence=0.9,
         ))
         assert reward.total >= 0.5
-        assert reward.feedback != ""
+        assert "Guessing Penalty" not in reward.feedback
 
     def test_state(self):
         client.post("/reset")
@@ -289,16 +296,15 @@ class TestAPI:
         assert resp.status_code == 404
 
     def test_reward_partial_credit(self):
-        """Verify partial credit is given for incomplete but relevant answers.
-        Uses a fixed-seed env to guarantee the overfitting easy task is selected.
-        """
-        from env.environment import MLDebugEnv as _Env
-        from env.models import Action as _Action
+        """Verify partial credit is given for incomplete but relevant answers."""
+        from ml_env.environment import MLDebugEnv as _Env
+        from ml_env.models import Action as _Action
         env = _Env(seed=1)
         env.reset()
+        env._called_tools = ["fetch_loss_curve"] # Avoid guessing penalty masking partial credit
         _, reward, _, _ = env.step(_Action(
             action_type="diagnose",
-            diagnosis="The model is overfitting",
+            diagnosis="There is data leakage",
             fix_type="wrong_type",
             fix_detail="unknown",
             confidence=0.5,
@@ -405,15 +411,16 @@ class TestTaskPool:
         assert len(seen_medium_task_ids) >= 2, f"Expected variety in medium tasks, only saw: {seen_medium_task_ids}"
 
     def test_easy_task_pool_varies(self):
-        """Verify the easy pool now has 2 variants — overfitting and nan_init."""
+        """Verify the easy pool now has 2 variants — data leakage and nan_init."""
         seen_easy_task_types = set()
         for seed in range(50):
             env = MLDebugEnv(seed=seed)
             env.reset()
             tasks = env.list_tasks()
             easy_task = next(t for t in tasks if t["difficulty"] == "easy")
-            # task_id format: overfitting_NNNN or nan_init_NNNN
+            # task_id format: data_leakage_NNNN or nan_init_NNNN
             task_type = easy_task["task_id"].rsplit("_", 1)[0]
+            if task_type == "data": task_type = "data_leakage" # handle data_leakage_seed format
             seen_easy_task_types.add(task_type)
         assert len(seen_easy_task_types) >= 2, f"Easy pool should have 2 variants, only saw: {seen_easy_task_types}"
 

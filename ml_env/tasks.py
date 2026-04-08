@@ -30,16 +30,16 @@ def _smooth(start: float, end: float, epochs: int, noise: float = 0.0, rng=None)
     ]
 
 
-# ─── Task 1: Overfitting (Easy) ────────────────────────────────────────────────
+# ─── Task 1: Data Leakage (Easy) ────────────────────────────────────────────────
 
-def generate_overfitting_task(seed: int = 42) -> Dict[str, Any]:
+def generate_data_leakage_task(seed: int = 42) -> Dict[str, Any]:
     rng = random.Random(seed)
-    epochs = 20
+    epochs = 5
 
-    train_loss = _smooth(2.1, 0.05, epochs, noise=0.02, rng=rng)
-    val_loss = _smooth(2.0, 0.45, 10, noise=0.03, rng=rng) + _smooth(0.45, 1.85, 10, noise=0.04, rng=rng)
-    train_acc = _smooth(0.45, 0.99, epochs, noise=0.01, rng=rng)
-    val_acc = _smooth(0.44, 0.81, 10, noise=0.02, rng=rng) + _smooth(0.81, 0.61, 10, noise=0.03, rng=rng)
+    train_loss = _smooth(0.05, 0.01, epochs, noise=0.005, rng=rng)
+    val_loss = _smooth(0.06, 0.012, epochs, noise=0.005, rng=rng)
+    train_acc = _smooth(0.98, 0.999, epochs, noise=0.001, rng=rng)
+    val_acc = _smooth(0.98, 0.998, epochs, noise=0.001, rng=rng)
 
     logs = []
     for i in range(epochs):
@@ -50,29 +50,24 @@ def generate_overfitting_task(seed: int = 42) -> Dict[str, Any]:
         )
 
     config = {
-        "model": "ResNet50",
-        "dataset": "CIFAR10_subset_5000",
-        "epochs": 20,
-        "batch_size": 32,
-        "optimizer": "Adam",
-        "lr": 0.001,
-        "dropout": 0.0,
-        "weight_decay": 0.0,
-        "data_augmentation": False,
-        "early_stopping": False,
+        "model": "XGBoostClassifier",
+        "dataset": "customer_churn_tabular",
+        "features_used": ["age", "account_age", "monthly_bill", "latest_churn_flag", "support_tickets"],
+        "epochs": 5,
+        "optimizer": "default",
     }
 
     gpu_metrics = {
-        "memory_mb": [rng.randint(3800, 4200) for _ in range(epochs)],
-        "util_pct": [rng.randint(85, 99) for _ in range(epochs)],
+        "memory_mb": [rng.randint(100, 200) for _ in range(epochs)],
+        "util_pct": [rng.randint(10, 20) for _ in range(epochs)],
     }
 
     return {
-        "task_id": f"overfitting_{seed}",
+        "task_id": f"data_leakage_{seed}",
         "difficulty": "easy",
         "description": (
-            "A ResNet-50 was trained for 20 epochs on a small image classification dataset. "
-            "Training finished but the deployed model performs poorly on new data. "
+            "An XGBoost model was trained on tabular customer churn data. "
+            "It achieved 99.8% precision instantly. But in a live A/B test, it performed no better than random guessing. "
             "Investigate what went wrong and prescribe a fix."
         ),
         "data": {
@@ -81,97 +76,81 @@ def generate_overfitting_task(seed: int = 42) -> Dict[str, Any]:
             "loss_curve": {"train": train_loss, "val": val_loss},
             "acc_curve": {"train": train_acc, "val": val_acc},
             "gpu_metrics": gpu_metrics,
-            "class_metrics": {i: round(rng.uniform(0.58, 0.68), 3) for i in range(10)},
+            "class_metrics": {i: round(rng.uniform(0.98, 0.99), 3) for i in range(2)},
         },
         "ground_truth": {
-            "bug_type": "overfitting",
-            "root_cause": "No regularization — dropout=0, weight_decay=0, no augmentation",
-            "affected_config_keys": ["dropout", "weight_decay", "data_augmentation"],
-            "valid_fix_types": ["config_change"],
-            "valid_fix_keywords": ["dropout", "weight_decay", "augmentation", "early_stopping"],
-            "diagnosis_keywords": ["overfit", "overfitting", "regularization", "val loss", "diverge"],
+            "bug_type": "data_leakage",
+            "root_cause": "The feature 'latest_churn_flag' is the target variable leaked into the training features.",
+            "affected_config_keys": ["features_used"],
+            "valid_fix_types": ["data_fix", "config_change"],
+            "valid_fix_keywords": ["leak", "leakage", "target", "remove", "latest_churn_flag", "exclude"],
+            "diagnosis_keywords": ["leak", "data leak", "data leakage", "target in features", "perfect accuracy", "too good"],
         },
     }
 
 
-# ─── Task 2: LR Explosion (Medium) ─────────────────────────────────────────────
+# ─── Task 2: FP16 Underflow (Medium) ─────────────────────────────────────────────
 
-def generate_lr_explosion_task(seed: int = 99) -> Dict[str, Any]:
+def generate_fp16_underflow_task(seed: int = 99) -> Dict[str, Any]:
     rng = random.Random(seed)
-    stable_epochs = 5
-    unstable_epochs = 10
+    epochs = 15
 
-    train_loss_stable = _smooth(2.3, 1.8, stable_epochs, noise=0.03, rng=rng)
-    train_loss_explode = [
-        round(1.8 * (1.6 ** i) + rng.uniform(0, 0.5), 4)
-        for i in range(unstable_epochs)
-    ]
-    train_loss_explode[-1] = float("nan")
-    train_loss = train_loss_stable + train_loss_explode
+    # Loss stalls immediately
+    train_loss = [round(rng.uniform(2.30, 2.31), 4) for _ in range(epochs)]
+    val_loss = [round(rng.uniform(2.30, 2.31), 4) for _ in range(epochs)]
 
-    val_loss = _smooth(2.4, 1.9, stable_epochs, noise=0.04, rng=rng) + [
-        round(min(99.9, 1.9 * (1.7 ** i)), 4) for i in range(unstable_epochs)
-    ]
-
-    grad_norms = [round(rng.uniform(0.8, 1.5), 3) for _ in range(stable_epochs)] + [
-        round(1.5 * (2.1 ** i), 3) for i in range(unstable_epochs)
-    ]
+    # Gradients underflow to exact 0.0
+    grad_norms = [0.000 for _ in range(epochs)]
 
     logs = []
-    for i in range(stable_epochs + unstable_epochs):
-        loss_val = train_loss[i]
-        loss_str = "nan" if loss_val != loss_val else f"{loss_val:.4f}"
+    for i in range(epochs):
         logs.append(
-            f"Epoch {i+1:02d} | train_loss={loss_str} | "
-            f"grad_norm={grad_norms[i]:.3f} | lr={0.5:.4f}"
+            f"Epoch {i+1:02d} | train_loss={train_loss[i]:.4f} | "
+            f"grad_norm={grad_norms[i]:.3f} | lr={0.001:.4f}"
         )
 
     config = {
-        "model": "TransformerSmall",
-        "dataset": "IMDB_sentiment",
+        "model": "Llama-3-8B-LoRA",
+        "dataset": "custom_chat",
         "epochs": 15,
-        "batch_size": 64,
-        "optimizer": "SGD",
-        "lr": 0.5,
-        "momentum": 0.9,
-        "lr_scheduler": None,
-        "gradient_clipping": None,
-        "dropout": 0.1,
-        "weight_decay": 1e-4,
+        "batch_size": 16,
+        "optimizer": "AdamW",
+        "lr": 1e-3,
+        "precision": "fp16",
+        "grad_scaler": False,
+        "gradient_clipping": 1.0,
     }
 
     gpu_metrics = {
-        "memory_mb": [rng.randint(6000, 7000) for _ in range(stable_epochs + unstable_epochs)],
-        "util_pct": [99 if i > stable_epochs else rng.randint(75, 90) for i in range(stable_epochs + unstable_epochs)],
+        "memory_mb": [rng.randint(75000, 78000) for _ in range(epochs)],
+        "util_pct": [rng.randint(95, 99) for _ in range(epochs)],
     }
 
     return {
-        "task_id": f"lr_explosion_{seed}",
+        "task_id": f"fp16_underflow_{seed}",
         "difficulty": "medium",
         "description": (
-            "A Transformer model was trained on sentiment classification. "
-            "Loss was stable for the first 5 epochs then suddenly exploded and "
-            "produced NaN. Training was automatically stopped. "
-            "Investigate the root cause and prescribe an exact fix with values."
+            "A Llama-3-8B model was fine-tuned using LoRA. The model runs fast on GPU, "
+            "but doesn't seem to be learning at all. Loss is completely stalled. "
+            "Investigate the root cause in the metrics or config and prescribe a fix."
         ),
         "data": {
             "logs": logs,
             "config": config,
-            "loss_curve": {"train": [x if x == x else 99.9 for x in train_loss], "val": val_loss},
+            "loss_curve": {"train": train_loss, "val": val_loss},
             "grad_norms": grad_norms,
             "gpu_metrics": gpu_metrics,
-            "class_metrics": {0: 0.52, 1: 0.49},
+            "class_metrics": {0: 0.1, 1: 0.1},
         },
         "ground_truth": {
-            "bug_type": "learning_rate_explosion",
-            "root_cause": "Learning rate 0.5 is far too high for SGD on transformer — causes gradient explosion",
-            "affected_config_keys": ["lr"],
+            "bug_type": "fp16_underflow",
+            "root_cause": "Using fp16 precision without a gradient scaler causes gradients to underflow to zero.",
+            "affected_config_keys": ["precision", "grad_scaler"],
             "valid_fix_types": ["config_change"],
-            "valid_fix_keywords": ["learning rate", "lr", "gradient clipping", "scheduler"],
-            "valid_lr_range": (1e-5, 1e-2),
+            "valid_fix_keywords": ["grad_scaler", "gradient scaler", "bf16", "bfloat16", "amp", "mixed precision scale"],
             "diagnosis_keywords": [
-                "learning rate", "lr", "gradient", "explod", "nan",
-                "instab", "too high", "diverge"
+                "underflow", "fp16", "gradient zero", "grad norm 0", "scaler",
+                "grad_scaler", "precision"
             ],
         },
     }
