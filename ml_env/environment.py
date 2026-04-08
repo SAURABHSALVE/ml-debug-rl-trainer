@@ -24,18 +24,18 @@ logger = logging.getLogger(__name__)
 from ml_env.graders import grade
 from ml_env.models import Action, Observation, Reward
 from ml_env.tasks import (
-    generate_lr_explosion_task,
-    generate_overfitting_task,
+    generate_data_leakage_task,
     generate_poisoning_task,
     generate_class_imbalance_task,
     generate_forgetting_task,
     generate_nan_init_task,
+    generate_fp16_underflow_task,
 )
 
 # Task pool by difficulty bracket — 3 per episode (1 easy, 1 medium, 1 hard)
 TASK_POOL = {
-    "easy":   [generate_overfitting_task, generate_nan_init_task],
-    "medium": [generate_lr_explosion_task, generate_class_imbalance_task],
+    "easy":   [generate_data_leakage_task, generate_nan_init_task],
+    "medium": [generate_fp16_underflow_task, generate_class_imbalance_task],
     "hard":   [generate_poisoning_task, generate_forgetting_task],
 }
 
@@ -51,9 +51,9 @@ AVAILABLE_TOOLS = [
 
 # Which tools give a +0.05 reward signal per bug type (keyed by bug_type for precision)
 RELEVANT_TOOLS_BY_BUG = {
-    "overfitting":             {"fetch_loss_curve", "fetch_config"},
+    "data_leakage":            {"fetch_class_metrics", "fetch_loss_curve"},
     "bad_initialization":      {"fetch_logs", "fetch_config"},
-    "learning_rate_explosion": {"fetch_logs", "fetch_config"},
+    "fp16_underflow":          {"fetch_logs", "fetch_config"},
     "class_imbalance":         {"fetch_class_metrics", "fetch_config"},
     "silent_data_poisoning":   {"fetch_class_metrics", "fetch_logs"},
     "catastrophic_forgetting": {"fetch_logs", "fetch_loss_curve"},
@@ -83,8 +83,9 @@ class MLDebugEnv:
         # Scores per task
         self._scores: Dict[str, float] = {}
 
-        # Max steps per task difficulty
-        self._max_steps_map = {"easy": 5, "medium": 6, "hard": 5}
+        # Global episode budget (instead of per-task)
+        self._episode_budget = 16
+        self._episode_steps = 0
 
     # ─── Reset ─────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,7 @@ class MLDebugEnv:
         ]
         self._task_index = 0
         self._scores = {}
+        self._episode_steps = 0
         
         logger.info(
             f"Episode reset: easy={self._tasks[0]['task_id']}, "
@@ -117,15 +119,14 @@ class MLDebugEnv:
         self._revealed_data = {}
         self._called_tools = []
         difficulty = task["difficulty"]
-        max_steps = self._max_steps_map[difficulty]
 
         return Observation(
             task_id=task["task_id"],
             difficulty=difficulty,
             description=task["description"],
-            step_number=0,
-            max_steps=max_steps,
-            steps_remaining=max_steps,
+            step_number=self._episode_steps,
+            max_steps=self._episode_budget,
+            steps_remaining=max(0, self._episode_budget - self._episode_steps),
             tool_result=None,
             action_history=[],
             available_tools=AVAILABLE_TOOLS,
@@ -139,17 +140,17 @@ class MLDebugEnv:
 
         task = self._current_task
         difficulty = task["difficulty"]
-        max_steps = self._max_steps_map[difficulty]
 
-        # ✅ FIX: Increment FIRST
+        # ✅ FIX: Increment FIRST (globally and locally)
         self._task_step += 1
+        self._episode_steps += 1
 
-        # ✅ Then check against limit
-        if self._task_step > max_steps and action.action_type != "diagnose":
+        # ✅ Then check against limit (global episode limit)
+        if self._episode_steps > self._episode_budget and action.action_type != "diagnose":
             reward = Reward(
                 score=0.0,
                 breakdown={},
-                feedback=f"Budget exhausted after {max_steps} steps. Score = 0.",
+                feedback=f"Global episode budget exhausted after {self._episode_budget} steps. Score = 0.",
                 total=0.0,
             )
             done, info, next_obs = self._advance_or_end(reward, difficulty, task)
@@ -178,9 +179,14 @@ class MLDebugEnv:
         }
         score, breakdown, feedback = grade(difficulty, action_data, task["ground_truth"])
 
-        # Efficiency bonus: got it right within half the budget
+        # 🚨 Guessing Penalty: If no tools called, agent is guessing and loses 80% of score
+        if len(self._called_tools) == 0:
+            score = score * 0.2
+            feedback += " | 🚨 Guessing Penalty: 0 investigation tools used! Score slashed."
+
+        # Efficiency bonus: got it right within very few steps
         efficiency_bonus = 0.0
-        if score >= 0.8 and self._task_step <= max_steps // 2 + 1:
+        if score >= 0.8 and self._task_step <= 3:
             efficiency_bonus = 0.05
             feedback += " | ⚡ Efficiency bonus: solved in few steps"
 
@@ -302,14 +308,13 @@ class MLDebugEnv:
 
     def _make_obs(self, task: Dict, tool_result: Optional[Dict]) -> Observation:
         difficulty = task["difficulty"]
-        max_steps = self._max_steps_map[difficulty]
         return Observation(
             task_id=task["task_id"],
             difficulty=difficulty,
             description=task["description"],
-            step_number=self._task_step,
-            max_steps=max_steps,
-            steps_remaining=max(0, max_steps - self._task_step),
+            step_number=self._episode_steps,
+            max_steps=self._episode_budget,
+            steps_remaining=max(0, self._episode_budget - self._episode_steps),
             tool_result=tool_result,
             action_history=list(self._action_history),
             available_tools=AVAILABLE_TOOLS,
@@ -350,13 +355,13 @@ class MLDebugEnv:
         if self._current_task is None:
             return {"status": "not_started", "call": "POST /reset to begin"}
         difficulty = self._current_task["difficulty"]
-        max_steps = self._max_steps_map[difficulty]
         return {
             "current_task": self._current_task["task_id"],
             "difficulty": difficulty,
             "task_index": self._task_index,
             "task_step": self._task_step,
-            "steps_remaining": max(0, max_steps - self._task_step),
+            "episode_steps": self._episode_steps,
+            "steps_remaining": max(0, self._episode_budget - self._episode_steps),
             "tools_called": self._called_tools,
             "action_history": self._action_history,
             "scores_so_far": self._scores,

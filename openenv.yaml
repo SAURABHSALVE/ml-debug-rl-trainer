@@ -1,5 +1,5 @@
 name: ml-experiment-debugger
-version: "2.2.0"
+version: "2.3.0"
 description: >
   An RL environment where AI agents diagnose broken ML training runs
   through multi-step investigation using a tool-use paradigm.
@@ -14,10 +14,10 @@ description: >
 
   Task pool — 6 unique scenarios across 3 difficulty levels:
     EASY:
-      1. overfitting_detection  — ResNet-50 overfits small dataset; val loss diverges
+      1. data_leakage           — XGBoost on tabular data; target leaked into features
       2. nan_init               — BERT custom model; init_std=10 causes NaN from epoch 1
     MEDIUM:
-      3. lr_explosion           — Transformer with SGD lr=0.5; loss explodes to NaN
+      3. fp16_underflow         — Llama3 LoRA in fp16; gradients underflow to 0 without scaler
       4. class_imbalance        — MobileNetV2 on medical X-rays; 95% majority class
     HARD:
       5. silent_data_poisoning  — EfficientNet-B0; 15-25% of one class has corrupt labels
@@ -139,11 +139,17 @@ reward:
   investigation_redundant: -0.05
   diagnose_score_range: [0.0, 1.0]
   efficiency_bonus:
-    trigger: score >= 0.8 AND steps_used <= max_steps // 2 + 1
+    trigger: score >= 0.8 AND local_task_steps <= 3
     value: 0.05
   trajectory_bonus:
     trigger: difficulty=hard AND easy_score > 0.7 AND medium_score > 0.6
     value: 0.05
+  guessing_penalty:
+    trigger: diagnose called with 0 investigation tools used for current task
+    value: "Score slashed by 80% (score * 0.2)"
+  path_bonus:
+    trigger: call fetch_class_metrics before diagnosing class_imbalance
+    value: 0.1
   grading_modes:
     keyword:
       description: Deterministic string-matching grader, always active
@@ -154,50 +160,45 @@ reward:
       blend: "60% LLM + 40% keyword"
 
 tasks:
-  - id: overfitting_detection
+  - id: data_leakage
     difficulty: easy
     score_range: [0.0, 1.0]
-    max_steps: 5
-    bug_type: overfitting
-    model: ResNet-50
+    bug_type: data_leakage
+    model: XGBoostClassifier
 
   - id: nan_init
     difficulty: easy
     score_range: [0.0, 1.0]
-    max_steps: 5
     bug_type: bad_initialization
     model: BERT-small-custom
 
-  - id: lr_explosion
+  - id: fp16_underflow
     difficulty: medium
     score_range: [0.0, 1.0]
-    max_steps: 6
-    bug_type: learning_rate_explosion
-    model: TransformerSmall
+    bug_type: fp16_underflow
+    model: Llama-3-8B-LoRA
 
   - id: class_imbalance
     difficulty: medium
     score_range: [0.0, 1.0]
-    max_steps: 6
     bug_type: class_imbalance
     model: MobileNetV2
 
   - id: silent_data_poisoning
     difficulty: hard
     score_range: [0.0, 1.0]
-    max_steps: 5
     bug_type: silent_data_poisoning
     model: EfficientNet-B0
 
   - id: catastrophic_forgetting
     difficulty: hard
     score_range: [0.0, 1.0]
-    max_steps: 5
     bug_type: catastrophic_forgetting
     model: ResNet-50 (pretrained)
 
 episode:
   tasks_per_episode: 3
+  global_step_budget: 16
   selection: "1 randomly sampled from each difficulty pool — seeded for reproducibility"
 
 api_endpoints:
