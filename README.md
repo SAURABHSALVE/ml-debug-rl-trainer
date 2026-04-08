@@ -21,10 +21,11 @@ app_port: 7860
 
 # ML Experiment Debugger — OpenEnv Environment
 
-> *Every ML engineer has stared at a broken training run wondering what went wrong.
-> We built an RL environment that teaches AI agents to debug like a senior engineer.*
+> **A structured RL benchmark for training AI agents to diagnose broken machine learning training runs.**
 
-Built for the **Meta × PyTorch × HuggingFace OpenEnv Hackathon** | Team: **AIverse**
+An RL environment where frontier AI models (GPT-4o, Llama-70B) analyze failed ML experiments and prescribe fixes. Given training logs, loss curves, configs, and GPU metrics — can your agent identify the root cause?
+
+**Built for OpenEnv Hackathon | Team: AIverse**
 
 🚀 **Live Demo:** [https://12-vinit-ml-experiment-debugger.hf.space](https://12-vinit-ml-experiment-debugger.hf.space)  
 📖 **API Docs (Swagger):** [https://12-vinit-ml-experiment-debugger.hf.space/docs](https://12-vinit-ml-experiment-debugger.hf.space/docs)  
@@ -32,40 +33,39 @@ Built for the **Meta × PyTorch × HuggingFace OpenEnv Hackathon** | Team: **AIv
 
 ---
 
-## 🎯 Why This Exists
+## Problem: The Debug Bottleneck
 
-ML training failures cost real money and real lives:
-- A model silently overfits and the product team only finds out after launch
-- A hospital's X-ray classifier reaches 93% accuracy — but never catches disease in minority classes
-- A fine-tuned model destroys its pretrained capabilities overnight (catastrophic forgetting)
+Every ML engineer has stared at a loss curve wondering:
+- **Why is validation loss diverging?** (overfitting? bad data? wrong hyperparams?)
+- **Why did loss explode suddenly?** (learning rate too high? gradient explosion?)
+- **Why is one class failing silently?** (label corruption? data imbalance?)
 
-These bugs are subtle, expensive to catch, and everywhere. This environment **formalizes the ML debugging process** into a structured, gradable RL task:
+**Current reality:** Debugging is manual, slow, and requires deep expertise.
+No ML engineer wants to train models just to debug other models.
 
-- Agent starts with **only a natural-language task description** (no data)
-- Must **choose which tools to call** from a limited step budget — each call costs one step
-- Must navigate **misleading signals** (93% accuracy masking class imbalance)
-- Must identify the **root cause** and prescribe a **specific, actionable fix**
-- Is graded on **diagnosis correctness** + **fix quality** + **investigation efficiency**
+**This environment solves it:** Formalizes diagnostic reasoning into a graded, benchmarkable task.
 
-No existing OpenEnv environment covers ML training diagnostics. This fills a direct gap for the HuggingFace / Meta engineering community — the same engineers who ship model training infrastructure every day.
+## Why Now? (OpenEnv + Hackathon Fit)
+
+✅ **First of its kind:** No existing OpenEnv environment covers ML training diagnostics  
+✅ **Directly useful:** HuggingFace & Meta engineers ship training infra daily  
+✅ **Benchmarkable:** Structured grading allows fair model comparison  
+✅ **Extensible:** Easy to add new failure modes, datasets, model architectures  
+
+This fills a direct gap in the ML ops benchmarking space.
 
 ---
 
-## 🧩 Environment Overview
+## Key Features
 
-| Property            | Value |
-|---|---|
-<<<<<<< HEAD
-| **Action Space**    | Structured (5 investigation tool calls + 1 terminal diagnose) |
-| **Observation**     | Structured (task description, tool result, step counter, action history) |
-| **Task Pool**       | **6 unique scenarios across 3 difficulty levels** |
-| **Tasks/Episode**   | 3 (1 easy + 1 medium + 1 hard, randomly sampled from pool) |
-| **Reward**          | Float in [0.0, 1.0] per task — partial credit |
-| **Max Steps**       | 5 (easy), 6 (medium), 8 (hard) |
-| **Grading**         | Keyword grader (always) + optional LLM grader (blended 60/40) |
-| **Efficiency Bonus**| +0.05 if correct diagnosis within half the step budget |
-| **Trajectory Bonus**| +0.05 on hard task if easy > 0.7 AND medium > 0.6 |
-| **Deployment**      | HuggingFace Spaces (port 7860), Docker-ready |
+| Feature | Benefit |
+|---------|---------|
+| **3 Escalating Tasks** | Easy (overfitting) → Medium (LR tuning) → Hard (data poisoning) |
+| **Partial Credit Grading** | Models get points for right direction, not just perfect answers |
+| **Realistic Scenarios** | Based on actual ML training failures engineers encounter |
+| **Structured Actions** | Agents propose: diagnosis + fix_type + fix_detail + confidence |
+| **Production-Ready** | Docker, tests, FastAPI, deployable to HF Spaces in <5 min |
+| **Baseline Evals** | GPT-4o: 72%, Llama-70B: 52% (shows room for agent training) |
 
 ---
 
@@ -75,33 +75,11 @@ No existing OpenEnv environment covers ML training diagnostics. This fills a dir
 **Scenario:** ResNet-50 trained for 20 epochs on CIFAR-10 subset. Training accuracy reaches 99% while val accuracy peaks at 81% then drops to 61%. Config shows `dropout=0`, `weight_decay=0`, `data_augmentation=False`.
 
 **Correct diagnosis:** overfitting | **Grader:** 0.5 pts for identifying overfitting · 0.5 pts for valid regularization fix
-=======
-| Action Space | Structured (investigation tool calls + terminal diagnose) |
-| Observation Space | Structured (task description, tool results, step counter) |
-| **Task Pool** | **6 distinct scenarios across 3 difficulty levels** |
-| Tasks per Episode | 3 (1 easy + 1 medium + 1 hard, randomly sampled from pool) |
-| Reward Type | Partial credit, float in [0.0, 1.0] |
-| Max Steps | 5 (easy), 6 (medium), 5 (hard) |
-| Grading | Keyword grader + optional LLM grader (blended 60/40) |
-| Efficiency Bonus | +0.05 if correct diagnosis in ≤ half budget |
-| Trajectory Bonus | +0.05 on hard if easy>0.7 AND medium>0.6 |
-| Deployment | HuggingFace Spaces (port 7860) |
-
----
-
-## Task Catalogue (6 Scenarios)
-
-### Task 1 — Catastrophic Forgetting `[hard]`
-**Scenario:** ResNet-50 pretrained on ImageNet is fine-tuned on satellite imagery. New task accuracy reaches 91%. But after deployment, the original ImageNet classification capability drops from 92% to under 15%. `freeze_backbone=False` and `lr=0.01` destroys pretrained representations.
-
-**Grader:** 0.5 pts for identifying catastrophic forgetting · 0.5 pts for proposing EWC / backbone freeze / replay buffer
->>>>>>> main
 
 **Baseline scores:** GPT-4o: ~0.65 | Llama-3.3-70B: ~0.55 | Llama-3-8B: ~0.15
 
 ---
 
-<<<<<<< HEAD
 ### Task 2 — NaN from Bad Initialization `[easy]`
 **Scenario:** Custom BERT-small trained on news classification. Loss is NaN from epoch 1, GPU utilization near 0%, training stopped after 8 epochs. Config contains `init_std=10.0`.
 
@@ -122,10 +100,6 @@ No existing OpenEnv environment covers ML training diagnostics. This fills a dir
 
 ### Task 4 — Class Imbalance `[medium]`
 **Scenario:** MobileNetV2 on a 4-class medical X-ray dataset. Overall accuracy=93% looks excellent. Class 0 has 9,500 samples; classes 1-3 have 135–198 samples. Model never predicts minority classes (recall ~2%).
-=======
-### Task 2 — Class Imbalance `[medium]`
-**Scenario:** MobileNetV2 on a 4-class medical X-ray dataset. Overall accuracy=93% looks excellent. But one class has 9500 samples while others have ~150-200. The model never predicts minority classes.
->>>>>>> main
 
 **Correct diagnosis:** class_imbalance | **Grader:** 0.5 pts for identifying class imbalance · 0.5 pts for proposing weighted loss / oversampling / SMOTE
 
@@ -133,13 +107,8 @@ No existing OpenEnv environment covers ML training diagnostics. This fills a dir
 
 ---
 
-<<<<<<< HEAD
 ### Task 5 — Silent Data Poisoning `[hard]`
 **Scenario:** EfficientNet-B0 on a 5-class manufacturing defect dataset. Overall accuracy=84% looks fine. But 15-25% of one class has corrupted labels — that class stagnates at 28-42% accuracy while others reach 87-95%. A generic anomaly warning appears in logs at epoch 14.
-=======
-### Task 3 — Silent Data Poisoning `[hard]`
-**Scenario:** EfficientNet-B0 on a 5-class manufacturing defect dataset. Overall accuracy=84% looks fine. But 15-25% of one class has corrupted labels. That class stagnates at ~35% while others reach 90%+. A generic anomaly warning appears in logs at epoch 13 — but doesn't name the class.
->>>>>>> main
 
 **Correct diagnosis:** silent_data_poisoning | **Grader:** 0.3 pts for data/label corruption · 0.2 pts for naming the correct class · 0.5 pts for data_fix proposal
 
@@ -147,17 +116,10 @@ No existing OpenEnv environment covers ML training diagnostics. This fills a dir
 
 ---
 
-<<<<<<< HEAD
 ### Task 6 — Catastrophic Forgetting `[hard]`
 **Scenario:** ResNet-50 pretrained on ImageNet is fine-tuned on satellite imagery binary classification. New task accuracy reaches 91%. But original ImageNet accuracy drops from 92% to under 15%. Config shows `freeze_backbone=False`, `lr=0.01`, `ewc_lambda=None`.
 
 **Correct diagnosis:** catastrophic_forgetting | **Grader:** 0.5 pts for identifying catastrophic forgetting · 0.5 pts for proposing EWC / backbone freeze / replay / lower LR
-=======
-### Task 4 — Learning Rate Explosion `[medium]`
-**Scenario:** Transformer trained with SGD at LR=0.5. Loss stable for 5 epochs then explodes, gradient norms grow >100 by epoch 8, produces NaN.
-
-**Grader:** 0.5 pts for naming LR/gradient explosion · 0.5 pts for proposing valid LR in [1e-5, 1e-2]
->>>>>>> main
 
 **Baseline scores:** GPT-4o: ~0.75 | Llama-3.3-70B: ~0.80 | Llama-3-8B: ~0.35
 
@@ -274,39 +236,20 @@ LLM grading uses robust multi-strategy JSON extraction with fallback to plain-te
 
 ---
 
-## 🚀 Setup & Running
+## Quick Start (30 seconds)
+
+### Docker (Recommended)
+```bash
+docker build -t ml-debug-env .
+docker run -p 7860:7860 ml-debug-env
+
+# Visit http://localhost:7860/docs for interactive API
+```
 
 ### Local Development
 ```bash
 pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port 7860 --reload
-```
-
-### Run Tests (full suite)
-```bash
-pytest tests/ -v
-```
-
-### Docker
-```bash
-docker build -t ml-debug-env .
-docker run -p 7860:7860 ml-debug-env
-```
-
-### Baseline Inference — Keyword Grading
-```bash
-export HF_TOKEN=your_hf_token
-export MODEL_NAME=meta-llama/Llama-3.3-70B-Instruct
-export API_BASE_URL=https://router.huggingface.co/v1
-python inference.py
-```
-
-### Baseline Inference — LLM Grading Enabled
-```bash
-export HF_TOKEN=your_hf_token
-export USE_LLM_GRADING=true
-export GRADER_MODEL=meta-llama/Llama-3.3-70B-Instruct
-python inference.py
+uvicorn app:app --host 0.0.0.0 --port 7860
 ```
 
 ---
