@@ -441,9 +441,7 @@ DIFFICULTY_GRADERS = {
 
 def grade(difficulty: str, action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
     """
-    Grade a diagnose action. Routes by bug_type for precise grading,
-    falls back to difficulty if bug_type is not present.
-    Applies LLM grading if USE_LLM_GRADING=true.
+    Internal grader dispatcher.
     """
     bug_type = ground_truth.get("bug_type", "")
     grader = BUG_TYPE_GRADERS.get(bug_type) or DIFFICULTY_GRADERS.get(difficulty)
@@ -451,4 +449,12 @@ def grade(difficulty: str, action_data: Dict[str, Any], ground_truth: Dict[str, 
         raise ValueError(f"No grader found for bug_type='{bug_type}' difficulty='{difficulty}'")
 
     keyword_score, keyword_breakdown, keyword_feedback = grader(action_data, ground_truth)
-    return llm_grade(action_data, ground_truth, keyword_score, keyword_breakdown, keyword_feedback)
+    return llm_grade(action_data, ground_truth, keyword_score, keyword_breakdown, keyword_feedback)
+
+
+def grade_task(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    """
+    Standard 2-argument grader entry point for OpenEnv.
+    """
+    difficulty = ground_truth.get("difficulty", "easy")
+    return grade(difficulty, action_data, ground_truth)

@@ -165,28 +165,28 @@ tasks:
     score_range: [0.0, 1.0]
     bug_type: data_leakage
     model: XGBoostClassifier
-    grader: ml_env.graders:grade_data_leakage
+    grader: ml_env.graders:grade_task
 
   - id: nan_init
     difficulty: easy
     score_range: [0.0, 1.0]
     bug_type: bad_initialization
     model: BERT-small-custom
-    grader: ml_env.graders:grade_nan_init
+    grader: ml_env.graders:grade_task
 
   - id: fp16_underflow
     difficulty: medium
     score_range: [0.0, 1.0]
     bug_type: fp16_underflow
     model: Llama-3-8B-LoRA
-    grader: ml_env.graders:grade_fp16_underflow
+    grader: ml_env.graders:grade_task
 
   - id: class_imbalance
     difficulty: medium
     score_range: [0.0, 1.0]
     bug_type: class_imbalance
     model: MobileNetV2
-    grader: ml_env.graders:grade_class_imbalance
+    grader: ml_env.graders:grade_task
 
   - id: silent_data_poisoning
     difficulty: hard
@@ -195,7 +195,7 @@ tasks:
     model: EfficientNet-B0
     max_steps: 5
     pool_slot: hard
-    grader: ml_env.graders:grade_data_poisoning
+    grader: ml_env.graders:grade_task
 
   - id: catastrophic_forgetting
     difficulty: hard
@@ -204,7 +204,7 @@ tasks:
     model: ResNet-50 (pretrained)
     max_steps: 5
     pool_slot: hard
-    grader: ml_env.graders:grade_forgetting
+    grader: ml_env.graders:grade_task
 
 episode:
   tasks_per_episode: 3
