@@ -281,6 +281,8 @@ class MLDebugEnv:
                 f"diagnosis='{diagnosis_preview}...', "
                 f"fix_type={action.fix_type}"
             )
+            # ✅ Standardized OpenEnv [END] pattern for automated validators
+            logger.info(f"[END] Task: {task['task_id']} | Status: Success | Final Score: {total:.2f}")
 
         done, info, next_obs = self._advance_or_end(reward, difficulty, task)
 
@@ -448,18 +450,18 @@ class MLDebugEnv:
 
     def list_tasks(self) -> List[Dict[str, Any]]:
         """
-        Return task ID, difficulty, description, and grader info for all tasks.
-        Works both before and after reset() — tasks are pre-generated at init.
-        Grader is returned as a string name (JSON-safe, not a function reference).
+        Return task ID, difficulty, description, and grader info for ALL 6 tasks.
         """
-        return [
-            {
-                "task_id": t["task_id"],
-                "difficulty": t["difficulty"],
-                "description": t["description"],
-                "has_grader": True,                      # ✅ validator-friendly boolean
-                "grader": t["grader"].__name__,          # ✅ string name, JSON-serializable
-                "bug_type": t["ground_truth"]["bug_type"],
-            }
-            for t in self._tasks
-        ]
+        all_tasks = []
+        for difficulty, generators in TASK_POOL.items():
+            for gen in generators:
+                t = gen(seed=42) # Seed doesn't change metadata
+                all_tasks.append({
+                    "task_id": t["task_id"],
+                    "difficulty": t["difficulty"],
+                    "description": t["description"],
+                    "has_grader": True,
+                    "grader": t["grader"].__name__,
+                    "bug_type": t["ground_truth"]["bug_type"],
+                })
+        return all_tasks

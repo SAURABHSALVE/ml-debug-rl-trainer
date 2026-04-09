@@ -72,7 +72,7 @@ def generate_data_leakage_task(seed: int = 42) -> Dict[str, Any]:
     }
 
     return {
-        "task_id": f"data_leakage_{seed}",
+        "task_id": "data_leakage",
         "difficulty": "easy",
         "description": (
             "An XGBoost model was trained on tabular customer churn data. "
@@ -137,7 +137,7 @@ def generate_fp16_underflow_task(seed: int = 99) -> Dict[str, Any]:
     }
 
     return {
-        "task_id": f"fp16_underflow_{seed}",
+        "task_id": "fp16_underflow",
         "difficulty": "medium",
         "description": (
             "A Llama-3-8B model was fine-tuned using LoRA. The model runs fast on GPU, "
@@ -226,7 +226,7 @@ def generate_poisoning_task(seed: int = 7) -> Dict[str, Any]:
     }
 
     return {
-        "task_id": f"data_poisoning_{seed}",
+        "task_id": "silent_data_poisoning",
         "difficulty": "hard",
         "description": (
             "An EfficientNet-B0 was trained on a 5-class manufacturing defect dataset. "
@@ -314,7 +314,7 @@ def generate_class_imbalance_task(seed: int = 55) -> Dict[str, Any]:
             }
 
     return {
-        "task_id": f"class_imbalance_{seed}",
+        "task_id": "class_imbalance",
         "difficulty": "medium",
         "description": (
             "A MobileNetV2 was trained on a 4-class medical X-ray classification dataset. "
@@ -408,7 +408,7 @@ def generate_forgetting_task(seed: int = 33) -> Dict[str, Any]:
     }
 
     return {
-        "task_id": f"catastrophic_forgetting_{seed}",
+        "task_id": "catastrophic_forgetting",
         "difficulty": "hard",
         "description": (
             "A ResNet-50 pretrained on ImageNet was fine-tuned on a satellite imagery binary classification task. "
@@ -500,7 +500,7 @@ def generate_nan_init_task(seed: int = 77) -> Dict[str, Any]:
     }
 
     return {
-        "task_id": f"nan_init_{seed}",
+        "task_id": "nan_init",
         "difficulty": "easy",
         "description": (
             "A custom BERT-small model was trained on a 10-class news classification dataset. "
