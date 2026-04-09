@@ -199,7 +199,7 @@ class MLDebugEnv:
             "fix_detail": action.fix_detail or "",
             "confidence": action.confidence or 0.0,
         }
-        logger.info(f"GRADER INPUT: {action_data}")
+        logger.info(f"DEBUG action_data = {action_data}")
         score, breakdown, feedback = grade(difficulty, action_data, task["ground_truth"])
 
         # 🚨 Guessing Penalty / Priority 1 - Reward investigation path

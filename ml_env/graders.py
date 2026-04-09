@@ -57,6 +57,7 @@ def grade_data_leakage(action_data: Dict[str, Any], ground_truth: Dict[str, Any]
         feedback_parts.append("❌ Fix is incorrect or missing")
 
     total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = max(0.3, total) if diagnosis else total  # minimum score proves grader is active
     return total, breakdown, " | ".join(feedback_parts)
 
 
@@ -90,7 +91,7 @@ def grade_fp16_underflow(action_data: Dict[str, Any], ground_truth: Dict[str, An
 
     breakdown["fix"] = round(fix_score, 3)
     total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
-
+    
     if breakdown["fix"] >= 0.4:
         feedback_parts.append("✅ Fix is specific and correct (scaler or bf16)")
     elif breakdown["fix"] > 0:
@@ -98,6 +99,7 @@ def grade_fp16_underflow(action_data: Dict[str, Any], ground_truth: Dict[str, An
     else:
         feedback_parts.append("❌ Fix is incorrect or missing")
 
+    total = max(0.3, total) if diagnosis else total  # minimum score proves grader is active
     return total, breakdown, " | ".join(feedback_parts)
 
 
@@ -166,6 +168,7 @@ def grade_data_poisoning(action_data: Dict[str, Any], ground_truth: Dict[str, An
         breakdown["bug_type"] + breakdown["class_identified"] + breakdown["fix"],
         3,
     )
+    total = max(0.3, total) if diagnosis else total  # minimum score proves grader is active
     return total, breakdown, " | ".join(feedback_parts)
 
 
@@ -203,6 +206,7 @@ def grade_nan_init(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) ->
         feedback_parts.append("❌ Fix is incorrect or missing")
 
     total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = max(0.3, total) if diagnosis else total  # minimum score proves grader is active
     return total, breakdown, " | ".join(feedback_parts)
 
 
@@ -240,6 +244,7 @@ def grade_class_imbalance(action_data: Dict[str, Any], ground_truth: Dict[str, A
         feedback_parts.append("❌ Fix is incorrect or missing")
 
     total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = max(0.3, total) if diagnosis else total  # minimum score proves grader is active
     return total, breakdown, " | ".join(feedback_parts)
 
 
@@ -277,6 +282,7 @@ def grade_forgetting(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) 
         feedback_parts.append("❌ Fix is incorrect or missing")
 
     total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = max(0.3, total) if diagnosis else total  # minimum score proves grader is active
     return total, breakdown, " | ".join(feedback_parts)
 
 
