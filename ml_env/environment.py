@@ -193,13 +193,19 @@ class MLDebugEnv:
             return obs, reward, False, {"task_step": self._task_step}
 
         # ── Diagnose (terminal) ───────────────────────────────────────────────
+        # Safe float coercion for confidence
+        try:
+            confidence = float(action.confidence) if action.confidence is not None else 0.0
+        except (ValueError, TypeError):
+            confidence = 0.0
+
         action_data = {
-            "diagnosis": action.diagnosis or "",
-            "fix_type": action.fix_type or "",
-            "fix_detail": action.fix_detail or "",
-            "confidence": action.confidence or 0.0,
+            "diagnosis": str(action.diagnosis or ""),
+            "fix_type": str(action.fix_type or ""),
+            "fix_detail": str(action.fix_detail or action.fix or ""),
+            "confidence": confidence,
         }
-        logger.info(f"DEBUG action_data = {action_data}")
+        logger.info(f"DEBUG action_data (normalized) = {action_data}")
         score, breakdown, feedback = grade(difficulty, action_data, task["ground_truth"])
 
         # 🚨 Guessing Penalty / Priority 1 - Reward investigation path
@@ -295,8 +301,19 @@ class MLDebugEnv:
         intermediate_reward = 0.02 if tool in relevant else 0.0
 
         if tool == "fetch_logs":
-            start = max(1, action.start_epoch or 1)
-            end = min(len(data["logs"]), action.end_epoch or len(data["logs"]))
+            # Safe integer coercion for epochs
+            try:
+                start_raw = action.start_epoch if action.start_epoch is not None else 1
+                start = max(1, int(start_raw))
+            except (ValueError, TypeError):
+                start = 1
+                
+            try:
+                end_raw = action.end_epoch if action.end_epoch is not None else len(data["logs"])
+                end = min(len(data["logs"]), int(end_raw))
+            except (ValueError, TypeError):
+                end = len(data["logs"])
+
             if start > end:
                 start, end = end, start
             result = data["logs"][start - 1 : end]
@@ -330,7 +347,13 @@ class MLDebugEnv:
             return {"gpu_metrics": data["gpu_metrics"]}, intermediate_reward
 
         elif tool == "fetch_class_metrics":
-            class_id = action.class_id
+            # Safe integer coercion for class_id
+            try:
+                class_id_raw = action.class_id
+                class_id = int(class_id_raw) if class_id_raw is not None else None
+            except (ValueError, TypeError):
+                class_id = None
+                
             cm = data.get("class_metrics", {})
             if class_id is not None:
                 if class_id in cm:
