@@ -91,11 +91,7 @@ action_space:
         - name: diagnosis
           type: str
           required: true
-        - name: fix_type
-          type: str
-          required: true
-          enum: [config_change, data_fix, architecture_change]
-        - name: fix_detail
+        - name: fix
           type: str
           required: true
         - name: confidence
@@ -105,7 +101,7 @@ action_space:
       terminal: true
       example: >
         {"action_type": "diagnose", "diagnosis": "LR 0.5 is too high...",
-         "fix_type": "config_change", "fix_detail": "reduce lr to 0.001", "confidence": 0.9}
+         "fix": "reduce learning rate to 0.001", "confidence": 0.9}
 
 observation_space:
   type: structured

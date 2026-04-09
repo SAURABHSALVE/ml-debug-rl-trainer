@@ -406,7 +406,13 @@ class MLDebugEnv:
     # ─── List Tasks ────────────────────────────────────────────────────────────
 
     def list_tasks(self) -> List[Dict[str, Any]]:
+        """Return task ID, difficulty, and description for all tasks in the episode."""
         return [
-            {"task_id": t["task_id"], "difficulty": t["difficulty"], "description": t["description"]}
+            {
+                "task_id": t["task_id"],
+                "difficulty": t["difficulty"],
+                "description": t["description"],
+                "grader": t["grader"],
+            }
             for t in self._tasks
         ] if self._tasks else []

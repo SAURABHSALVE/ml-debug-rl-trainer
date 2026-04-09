@@ -16,6 +16,15 @@ Task catalogue (5 tasks, 3 selected per episode):
 import random
 from typing import Any, Dict
 
+from ml_env.graders import (
+    grade_data_leakage,
+    grade_nan_init,
+    grade_fp16_underflow,
+    grade_class_imbalance,
+    grade_data_poisoning,
+    grade_forgetting
+)
+
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -79,7 +88,6 @@ def generate_data_leakage_task(seed: int = 42) -> Dict[str, Any]:
             "class_metrics": {i: round(rng.uniform(0.98, 0.99), 3) for i in range(2)},
         },
         "ground_truth": {
-            "difficulty": "easy",
             "bug_type": "data_leakage",
             "root_cause": "The feature 'latest_churn_flag' is the target variable leaked into the training features.",
             "affected_config_keys": ["features_used"],
@@ -87,6 +95,7 @@ def generate_data_leakage_task(seed: int = 42) -> Dict[str, Any]:
             "valid_fix_keywords": ["leak", "leakage", "target", "remove", "latest_churn_flag", "exclude"],
             "diagnosis_keywords": ["leak", "data leak", "data leakage", "target in features", "perfect accuracy", "too good"],
         },
+        "grader": grade_data_leakage,
     }
 
 
@@ -144,7 +153,6 @@ def generate_fp16_underflow_task(seed: int = 99) -> Dict[str, Any]:
             "class_metrics": {0: 0.1, 1: 0.1},
         },
         "ground_truth": {
-            "difficulty": "medium",
             "bug_type": "fp16_underflow",
             "root_cause": "Using fp16 precision without a gradient scaler causes gradients to underflow to zero.",
             "affected_config_keys": ["precision", "grad_scaler"],
@@ -155,6 +163,7 @@ def generate_fp16_underflow_task(seed: int = 99) -> Dict[str, Any]:
                 "grad_scaler", "precision"
             ],
         },
+        "grader": grade_fp16_underflow,
     }
 
 
@@ -234,7 +243,6 @@ def generate_poisoning_task(seed: int = 7) -> Dict[str, Any]:
             "class_metrics": class_metrics,
         },
         "ground_truth": {
-            "difficulty": "hard",
             "bug_type": "silent_data_poisoning",
             "root_cause": f"15-25% of labels in class_{poisoned_class} are corrupted",
             "poisoned_class": poisoned_class,
@@ -247,6 +255,7 @@ def generate_poisoning_task(seed: int = 7) -> Dict[str, Any]:
                 f"class_{poisoned_class}",
             ],
         },
+        "grader": grade_data_poisoning,
     }
 
 
@@ -326,7 +335,6 @@ def generate_class_imbalance_task(seed: int = 55) -> Dict[str, Any]:
             },
         },
         "ground_truth": {
-            "difficulty": "medium",
             "bug_type": "class_imbalance",
             "root_cause": "Severe class imbalance — 95% of data is class 0; model predicts majority class",
             "affected_config_keys": ["class_weights", "sampler", "loss_function"],
@@ -340,6 +348,7 @@ def generate_class_imbalance_task(seed: int = 55) -> Dict[str, Any]:
                 "skew", "overrepresent", "weighted", "dominant class",
             ],
         },
+        "grader": grade_class_imbalance,
     }
 
 
@@ -426,7 +435,6 @@ def generate_forgetting_task(seed: int = 33) -> Dict[str, Any]:
             },
         },
         "ground_truth": {
-            "difficulty": "hard",
             "bug_type": "catastrophic_forgetting",
             "root_cause": (
                 "No regularization during fine-tuning — model overwrites original weights. "
@@ -444,6 +452,7 @@ def generate_forgetting_task(seed: int = 33) -> Dict[str, Any]:
                 "backbone", "representation",
             ],
         },
+        "grader": grade_forgetting,
     }
 
 
@@ -511,7 +520,6 @@ def generate_nan_init_task(seed: int = 77) -> Dict[str, Any]:
             "class_metrics": {i: 0.1 for i in range(10)},  # All ~random — model never learned
         },
         "ground_truth": {
-            "difficulty": "easy",
             "bug_type": "bad_initialization",
             "root_cause": "Weight init_std=10.0 is ~500x too large for a BERT-style model (should be ~0.02), causing activations to overflow to NaN immediately",
             "affected_config_keys": ["init_std"],
@@ -526,4 +534,5 @@ def generate_nan_init_task(seed: int = 77) -> Dict[str, Any]:
                 "std too large", "too high",
             ],
         },
+        "grader": grade_nan_init,
     }
