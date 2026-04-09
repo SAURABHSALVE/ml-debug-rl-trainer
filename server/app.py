@@ -60,7 +60,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global environment instance (stateful, one per server process)
+# ✅ Global environment instance — tasks pre-generated at init (no reset() needed)
 env = MLDebugEnv()
 
 
@@ -195,18 +195,23 @@ def state() -> Dict[str, Any]:
 
 @app.get(
     "/tasks",
-    summary="List all 3 tasks in the current episode",
+    summary="List all tasks with graders",
     tags=["introspection"],
 )
 def list_tasks() -> Dict[str, Any]:
     """
-    Returns the task ID, difficulty, and description for all 3 tasks in the current episode.
-    Call `POST /reset` first to populate the task list.
+    Returns the task ID, difficulty, description, and grader info for all tasks.
+
+    ✅ Works immediately on server startup — no need to call POST /reset first.
+    Tasks are pre-generated when the server starts.
+    Call POST /reset to get a fresh random set of tasks.
     """
     tasks = env.list_tasks()
     return {
         "episode_active": env._current_task is not None,
         "task_count": len(tasks),
+        # ✅ Top-level grader_count so validator can find it easily
+        "grader_count": sum(1 for t in tasks if t.get("has_grader", False)),
         "tasks": tasks,
     }
 
@@ -223,7 +228,11 @@ def health() -> Dict[str, str]:
         "version": "2.3.0",
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "episode_active": str(env._current_task is not None),
+        # ✅ Include task count in health so validator can discover graders here too
+        "task_count": str(len(env._tasks)),
+        "grader_count": str(len([t for t in env._tasks if t.get("grader")])),
     }
+
 
 # ─── APIRouter for Frontend ──────────────────────────────────────────────────
 
@@ -241,7 +250,7 @@ def api_step(action: Action):
 def api_state():
     return state()
 
-@api_router.get("/tasks", summary="List all 3 tasks in current episode")
+@api_router.get("/tasks", summary="List all tasks with graders")
 def api_list_tasks():
     return list_tasks()
 
@@ -257,13 +266,19 @@ app.include_router(api_router)
 @app.on_event("startup")
 async def startup():
     logger.info("ML Experiment Debugger v2.3.0 starting up — OpenEnv compatible")
+    # ✅ Log task + grader info at startup so it's visible in server logs
+    tasks = env.list_tasks()
+    logger.info(f"Pre-loaded {len(tasks)} tasks with graders:")
+    for t in tasks:
+        logger.info(
+            f"  [{t['difficulty'].upper()}] {t['task_id']} → grader={t['grader']} has_grader={t['has_grader']}"
+        )
 
 
 @app.on_event("shutdown")
 async def shutdown():
     logger.info("ML Experiment Debugger shutting down")
 
-# Note: Root "/" is handled by the redirect above (line ~71) → /docs
 
 def main():
     import uvicorn

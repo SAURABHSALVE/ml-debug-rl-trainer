@@ -68,8 +68,7 @@ TERMINAL ACTION (call when you are confident — ends the task):
   {
     "action_type": "diagnose",
     "diagnosis":   "Root cause explanation...",
-    "fix_type":    "config_change | data_fix | architecture_change",
-    "fix_detail":  "Exact fix with values...",
+    "fix":         "Exact fix with values...",
     "confidence":  0.9
   }
 
@@ -81,9 +80,7 @@ STRATEGY BY DIFFICULTY:
 
 RULES:
   ✅ Be SPECIFIC: name exact class, exact config key and value.
-  ✅ For data issues, use fix_type=data_fix.
-  ✅ For hyperparameter issues, use fix_type=config_change.
-  ✅ For architecture/continual-learning issues, use fix_type=architecture_change.
+  ✅ Mention categories in fix (e.g. data_fix, config_change) when describing the solution.
   ❌ Do NOT repeat a tool call — it costs a step and returns nothing new.
   ❌ Do NOT call fetch_gpu_metrics unless all other signals are exhausted.
 
@@ -127,8 +124,7 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
         return {
             "action_type": "diagnose",
             "diagnosis":   f"LLM unreachable or timed out during get_agent_action. Error: {str(e)[:200]}",
-            "fix_type":    "config_change",
-            "fix_detail":  "Please check HuggingFace Router status and HF_TOKEN validity.",
+            "fix":         "config_change: Please check HuggingFace Router status and HF_TOKEN validity.",
             "confidence":  0.1,
         }
 
@@ -152,8 +148,7 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
     return {
         "action_type": "diagnose",
         "diagnosis":   raw[:500],
-        "fix_type":    "config_change",
-        "fix_detail":  "Unable to parse structured response",
+        "fix":         "config_change: Unable to parse structured response",
         "confidence":  0.1,
     }
 

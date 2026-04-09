@@ -72,7 +72,6 @@ class MLDebugEnv:
         self._rng = random.Random(seed)
 
         # Episode state
-        self._tasks: List[Dict[str, Any]] = []
         self._task_index: int = 0
         self._current_task: Optional[Dict[str, Any]] = None
         self._task_step: int = 0
@@ -86,6 +85,24 @@ class MLDebugEnv:
         # Global episode budget (instead of per-task)
         self._episode_budget = 16
         self._episode_steps = 0
+
+        # ✅ FIX: Pre-generate tasks at init so list_tasks() works before reset()
+        self._tasks: List[Dict[str, Any]] = self._generate_task_set(seed)
+
+    # ─── Task Generation ───────────────────────────────────────────────────────
+
+    def _generate_task_set(self, seed: int) -> List[Dict[str, Any]]:
+        """Generate 1 easy + 1 medium + 1 hard task. Used at init and reset."""
+        rng = random.Random(seed)
+        s = rng.randint(1, 9999)
+        easy_gen   = rng.choice(TASK_POOL["easy"])
+        medium_gen = rng.choice(TASK_POOL["medium"])
+        hard_gen   = rng.choice(TASK_POOL["hard"])
+        return [
+            easy_gen(seed=s),
+            medium_gen(seed=s + 1),
+            hard_gen(seed=s + 2),
+        ]
 
     # ─── Reset ─────────────────────────────────────────────────────────────────
 
@@ -104,12 +121,12 @@ class MLDebugEnv:
         self._task_index = 0
         self._scores = {}
         self._episode_steps = 0
-        
+
         logger.info(
             f"Episode reset: easy={self._tasks[0]['task_id']}, "
             f"medium={self._tasks[1]['task_id']}, hard={self._tasks[2]['task_id']}"
         )
-        
+
         return self._load_task(self._tasks[0])
 
     def _load_task(self, task: Dict[str, Any]) -> Observation:
@@ -178,8 +195,7 @@ class MLDebugEnv:
         # ── Diagnose (terminal) ───────────────────────────────────────────────
         action_data = {
             "diagnosis": action.diagnosis or "",
-            "fix_type": action.fix_type or "",
-            "fix_detail": action.fix_detail or "",
+            "fix": action.fix or "",
             "confidence": action.confidence or 0.0,
         }
         score, breakdown, feedback = grade(difficulty, action_data, task["ground_truth"])
@@ -245,7 +261,7 @@ class MLDebugEnv:
 
         self._action_history.append("diagnose")
         self._scores[difficulty] = total
-        
+
         if action.action_type == "diagnose":
             diagnosis_preview = (action.diagnosis or "None")[:60]
             logger.info(
@@ -254,7 +270,7 @@ class MLDebugEnv:
                 f"diagnosis='{diagnosis_preview}...', "
                 f"fix_type={action.fix_type}"
             )
-            
+
         done, info, next_obs = self._advance_or_end(reward, difficulty, task)
 
         return next_obs, reward, done, info
@@ -269,16 +285,14 @@ class MLDebugEnv:
 
         # ✅ FIX 1: Check repeat BEFORE appending
         if tool in self._called_tools:
-            # Don't append again — return immediately
             return {"result": "Already called this tool. No new information."}, -0.01
 
         # ✅ FIX 2: Append only on success
         self._called_tools.append(tool)
-        
+
         intermediate_reward = 0.02 if tool in relevant else 0.0
 
         if tool == "fetch_logs":
-            # Validate inputs
             start = max(1, action.start_epoch or 1)
             end = min(len(data["logs"]), action.end_epoch or len(data["logs"]))
             if start > end:
@@ -333,7 +347,6 @@ class MLDebugEnv:
 
     def _make_obs(self, task: Dict, tool_result: Optional[Dict]) -> Observation:
         difficulty = task["difficulty"]
-        # Pull these from tool_result if they exist so the frontend can read them directly
         loss_curve = tool_result.get("loss_curve", {"train": [], "val": []}) if tool_result else {"train": [], "val": []}
         class_metrics = tool_result.get("class_metrics", {}) if tool_result else {}
         logs = tool_result.get("logs", []) if tool_result else []
@@ -406,13 +419,19 @@ class MLDebugEnv:
     # ─── List Tasks ────────────────────────────────────────────────────────────
 
     def list_tasks(self) -> List[Dict[str, Any]]:
-        """Return task ID, difficulty, and description for all tasks in the episode."""
+        """
+        Return task ID, difficulty, description, and grader info for all tasks.
+        Works both before and after reset() — tasks are pre-generated at init.
+        Grader is returned as a string name (JSON-safe, not a function reference).
+        """
         return [
             {
                 "task_id": t["task_id"],
                 "difficulty": t["difficulty"],
                 "description": t["description"],
-                "grader": t["grader"],
+                "has_grader": True,                      # ✅ validator-friendly boolean
+                "grader": t["grader"].__name__,          # ✅ string name, JSON-serializable
+                "bug_type": t["ground_truth"]["bug_type"],
             }
             for t in self._tasks
-        ] if self._tasks else []
+        ]
