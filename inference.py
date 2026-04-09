@@ -114,13 +114,23 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
     )
     messages.append({"role": "user", "content": user_msg})
 
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=messages,
-        max_tokens=512,
-        temperature=0.1,
-    )
-    raw = response.choices[0].message.content.strip()
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages,
+            max_tokens=512,
+            temperature=0.1,
+        )
+        raw = response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"\n  ⚠️ LLM Call Failed: {e}. Using fallback...")
+        return {
+            "action_type": "diagnose",
+            "diagnosis":   f"LLM unreachable or timed out during get_agent_action. Error: {str(e)[:200]}",
+            "fix_type":    "config_change",
+            "fix_detail":  "Please check HuggingFace Router status and HF_TOKEN validity.",
+            "confidence":  0.1,
+        }
 
     # ── JSON extraction ───────────────────────────────────────────────────────
     # Try direct parse first
