@@ -268,7 +268,6 @@ class MLDebugEnv:
                 f"Task {task['task_id']} diagnosed: "
                 f"score={total:.2f}, "
                 f"diagnosis='{diagnosis_preview}...', "
-                f"fix_type={action.fix_type}"
             )
 
         done, info, next_obs = self._advance_or_end(reward, difficulty, task)
