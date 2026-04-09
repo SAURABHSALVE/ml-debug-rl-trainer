@@ -195,7 +195,8 @@ class MLDebugEnv:
         # ── Diagnose (terminal) ───────────────────────────────────────────────
         action_data = {
             "diagnosis": action.diagnosis or "",
-            "fix": action.fix or "",
+            "fix_type": action.fix_type or "",
+            "fix_detail": action.fix_detail or "",
             "confidence": action.confidence or 0.0,
         }
         score, breakdown, feedback = grade(difficulty, action_data, task["ground_truth"])
@@ -268,6 +269,7 @@ class MLDebugEnv:
                 f"Task {task['task_id']} diagnosed: "
                 f"score={total:.2f}, "
                 f"diagnosis='{diagnosis_preview}...', "
+                f"fix_type={action.fix_type}"
             )
 
         done, info, next_obs = self._advance_or_end(reward, difficulty, task)

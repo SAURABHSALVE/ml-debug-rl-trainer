@@ -20,7 +20,8 @@ class Action(BaseModel):
     
     # Diagnose parameters (optional)
     diagnosis: Optional[str] = None
-    fix: Optional[str] = None
+    fix_type: Optional[str] = None
+    fix_detail: Optional[str] = None
     confidence: Optional[float] = None
 
     @validator("action_type")

@@ -22,7 +22,8 @@ def _contains_any(text: str, keywords: list) -> bool:
 
 def grade_data_leakage(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
     diagnosis = (action_data.get("diagnosis") or "").strip()
-    fix = (action_data.get("fix") or "").strip()
+    fix_type = (action_data.get("fix_type") or "").strip()
+    fix_detail = (action_data.get("fix_detail") or "").strip()
     
     breakdown = {}
     feedback_parts = []
@@ -41,10 +42,9 @@ def grade_data_leakage(action_data: Dict[str, Any], ground_truth: Dict[str, Any]
     valid_fix_types = ground_truth["valid_fix_types"]
     fix_score = 0.0
     
-    # Check if any of the valid categories are mentioned
-    if _contains_any(fix, valid_fix_types):
+    if fix_type in valid_fix_types:
         fix_score += 0.2
-    if _contains_any(fix, fix_keywords):
+    if _contains_any(fix_detail, fix_keywords):
         fix_score += 0.3
     
     breakdown["fix"] = round(fix_score, 3)
