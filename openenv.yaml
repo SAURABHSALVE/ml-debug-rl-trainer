@@ -161,50 +161,62 @@ reward:
 
 tasks:
   - id: data_leakage
+    name: "Customer Churn Data Leakage"
+    description: "Identify how a target variable leaked into training features in an XGBoost model."
     difficulty: easy
     score_range: [0.0, 1.0]
     bug_type: data_leakage
     model: XGBoostClassifier
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: nan_init
+    name: "BERT NaN Weight Initialization"
+    description: "Diagnose why a BERT model produces NaN loss from the first epoch due to bad initialization."
     difficulty: easy
     score_range: [0.0, 1.0]
     bug_type: bad_initialization
     model: BERT-small-custom
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: fp16_underflow
+    name: "Llama-3 FP16 Gradient Underflow"
+    description: "Fix a training stall caused by FP16 underflow without a gradient scaler."
     difficulty: medium
     score_range: [0.0, 1.0]
     bug_type: fp16_underflow
     model: Llama-3-8B-LoRA
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: class_imbalance
+    name: "Medical X-Ray Class Imbalance"
+    description: "Detect hidden performance collapse in minority classes due to severe label skew."
     difficulty: medium
     score_range: [0.0, 1.0]
     bug_type: class_imbalance
     model: MobileNetV2
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: silent_data_poisoning
+    name: "Manufacturing Defects Data Poisoning"
+    description: "Investigate silent corruption of labels in a specific manufacturing defect class."
     difficulty: hard
     score_range: [0.0, 1.0]
     bug_type: silent_data_poisoning
     model: EfficientNet-B0
     max_steps: 5
     pool_slot: hard
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: catastrophic_forgetting
+    name: "ResNet-50 Catastrophic Forgetting"
+    description: "Identify why fine-tuning on new data destroyed the model's original capabilities."
     difficulty: hard
     score_range: [0.0, 1.0]
     bug_type: catastrophic_forgetting
     model: ResNet-50 (pretrained)
     max_steps: 5
     pool_slot: hard
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
 episode:
   tasks_per_episode: 3
