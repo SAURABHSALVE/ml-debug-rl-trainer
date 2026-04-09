@@ -21,6 +21,7 @@ def _contains_any(text: str, keywords: list) -> bool:
 # ─── Task 1 Grader: Data Leakage ────────────────────────────────────────────────
 
 def grade_data_leakage(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) -> Tuple[float, Dict, str]:
+    logger.info(f"GRADER RECEIVED (Leakage): {action_data}")
     diagnosis = (action_data.get("diagnosis") or "").strip()
     fix_type = (action_data.get("fix_type") or "").strip()
     fix_detail = (action_data.get("fix_detail") or "").strip()
