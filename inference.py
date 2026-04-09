@@ -168,7 +168,8 @@ def run_episode() -> dict:
 
     result = _post("/reset")
     obs = result["observation"]
-    print(f"Episode started. Task 1: {obs['task_id']} ({obs['difficulty']})")
+    print(f"[START] task={obs['task_id']}", flush=True)
+    print(f"Episode started. Task: {obs['task_id']} ({obs['difficulty']})")
 
     all_scores:    dict = {}
     episode_done:  bool = False
@@ -187,12 +188,12 @@ def run_episode() -> dict:
             print(f"  Step {obs['step_number'] + 1:2d} | remaining={steps_remaining} | ", end="")
 
             action = get_agent_action(task_description, task_history, obs)
-            print(f"action={action.get('action_type')}", end="")
+            print(f"action={action.get('action_type')}", end="", flush=True)
 
             if action.get("action_type") == "diagnose":
-                print(f" | diagnosis={action.get('diagnosis', '')[:60]}...")
+                print(f" | diagnosis={action.get('diagnosis', '')[:60]}...", flush=True)
             else:
-                print()
+                print(flush=True)
 
             result  = _post("/step", action)
             reward  = result["reward"]
@@ -201,7 +202,8 @@ def run_episode() -> dict:
             info    = result["info"]
 
             # `reward.total` is the scored value (investigation steps have low intermediate rewards)
-            print(f"           reward.total={reward['total']:.3f} | {reward['feedback'][:80]}")
+            print(f"[STEP] step={obs['step_number']} reward={reward['total']}", flush=True)
+            print(f"           reward.total={reward['total']:.3f} | {reward['feedback'][:80]}", flush=True)
 
             task_history.append({
                 "user":      f"steps_remaining={steps_remaining} | last_result={json.dumps(obs.get('tool_result', {}))}",
@@ -210,17 +212,18 @@ def run_episode() -> dict:
 
             if action.get("action_type") == "diagnose":
                 all_scores[current_diff] = reward["total"]
-                print(f"\n  ✅ Task complete. Score: {reward['total']:.3f}")
+                print(f"[END] task={current_task_id} score={reward['total']} steps={obs['step_number']}", flush=True)
+                print(f"\n  ✅ Task complete. Score: {reward['total']:.3f}", flush=True)
 
                 if done:
                     episode_done = True
-                    print(f"\n{'='*60}")
-                    print("EPISODE COMPLETE")
-                    print(f"Scores:  {info.get('scores', {})}")
-                    print(f"Average: {info.get('average_score', 0):.3f}")
-                    print(f"{'='*60}")
+                    print(f"\n{'='*60}", flush=True)
+                    print("EPISODE COMPLETE", flush=True)
+                    print(f"Scores:  {info.get('scores', {})}", flush=True)
+                    print(f"Average: {info.get('average_score', 0):.3f}", flush=True)
+                    print(f"{'='*60}", flush=True)
                 else:
-                    print(f"  Next task: {obs['task_id']} ({obs['difficulty']})")
+                    print(f"  Next task: {obs['task_id']} ({obs['difficulty']})", flush=True)
                 break
 
             time.sleep(0.4)  # courtesy rate-limit
