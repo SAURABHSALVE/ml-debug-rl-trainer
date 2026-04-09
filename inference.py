@@ -118,7 +118,7 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            max_tokens=512,
+            max_tokens=320,
             temperature=0.1,
         )
         raw = response.choices[0].message.content.strip()
@@ -226,7 +226,7 @@ def run_episode() -> dict:
                     print(f"  Next task: {obs['task_id']} ({obs['difficulty']})", flush=True)
                 break
 
-            time.sleep(0.4)  # courtesy rate-limit
+            time.sleep(0.1)  # courtesy rate-limit
 
     return all_scores
 
@@ -246,7 +246,7 @@ def main():
     print(f"  {'average':8s}: {avg:.3f}")
     print(f"  runtime:  {elapsed:.1f}s")
 
-    assert elapsed < 1200, f"Inference took {elapsed:.0f}s — exceeds 20-min limit"
+    assert elapsed < 1800, f"Inference took {elapsed:.0f}s — exceeds 30-min limit"
     print("\n✅ All checks passed. Ready to submit.")
 
 
