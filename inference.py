@@ -156,7 +156,8 @@ def run_episode() -> dict:
     print(f"Environment: {ENV_BASE_URL}")
     print(f"{'='*60}\n")
 
-    obs = _post("/reset")
+    result = _post("/reset")
+    obs = result["observation"]
     print(f"Episode started. Task 1: {obs['task_id']} ({obs['difficulty']})")
 
     all_scores:    dict = {}
