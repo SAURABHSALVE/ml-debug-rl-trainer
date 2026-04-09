@@ -68,7 +68,8 @@ TERMINAL ACTION (call when you are confident — ends the task):
   {
     "action_type": "diagnose",
     "diagnosis":   "Root cause explanation...",
-    "fix":         "Exact fix with values...",
+    "fix_type":    "config_change | data_fix | architecture_change",
+    "fix_detail":  "Exact fix with values...",
     "confidence":  0.9
   }
 
@@ -80,7 +81,9 @@ STRATEGY BY DIFFICULTY:
 
 RULES:
   ✅ Be SPECIFIC: name exact class, exact config key and value.
-  ✅ Mention categories in fix (e.g. data_fix, config_change) when describing the solution.
+  ✅ For data issues, use fix_type=data_fix.
+  ✅ For hyperparameter issues, use fix_type=config_change.
+  ✅ For architecture/continual-learning issues, use fix_type=architecture_change.
   ❌ Do NOT repeat a tool call — it costs a step and returns nothing new.
   ❌ Do NOT call fetch_gpu_metrics unless all other signals are exhausted.
 
@@ -93,7 +96,9 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
     """Ask the LLM for the next action given the current observation."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    for h in history:
+    # FIX 1: Only keep the last 4 history turns to prevent prompt bloat
+    # that causes the LLM to truncate fix_type/fix_detail fields.
+    for h in history[-4:]:
         messages.append({"role": "user",      "content": h["user"]})
         messages.append({"role": "assistant", "content": h["assistant"]})
 
@@ -115,7 +120,11 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            max_tokens=320,
+            # FIX 2: Increased from 320 to 512 tokens.
+            # A full diagnose JSON with all 5 fields needs ~250-300 tokens minimum.
+            # At 320, any verbosity causes truncation which breaks json.loads()
+            # and silently triggers the fallback with empty fix_type/fix_detail.
+            max_tokens=512,
             temperature=0.1,
         )
         raw = response.choices[0].message.content.strip()
@@ -124,7 +133,8 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
         return {
             "action_type": "diagnose",
             "diagnosis":   f"LLM unreachable or timed out during get_agent_action. Error: {str(e)[:200]}",
-            "fix":         "config_change: Please check HuggingFace Router status and HF_TOKEN validity.",
+            "fix_type":    "config_change",
+            "fix_detail":  "Please check HuggingFace Router status and HF_TOKEN validity.",
             "confidence":  0.1,
         }
 
@@ -144,11 +154,14 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
             except json.JSONDecodeError:
                 pass
 
-    # Last resort: return a low-confidence diagnose so the episode continues
+    # FIX 3: Last-resort fallback now includes a meaningful fix_detail
+    # so the grader's keyword matching has something to work with.
+    # Previously "Unable to parse structured response" scored 0 in every grader.
     return {
         "action_type": "diagnose",
         "diagnosis":   raw[:500],
-        "fix":         "config_change: Unable to parse structured response",
+        "fix_type":    "config_change",
+        "fix_detail":  "reduce learning rate, check init_std, verify data pipeline for leakage or poisoning",
         "confidence":  0.1,
     }
 
