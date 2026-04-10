@@ -36,16 +36,17 @@ def _request(path: str, method: str = "GET", body: dict = None) -> dict:
         method=method,
     )
     
-    max_retries = 3
+    max_retries = 5
     for attempt in range(max_retries):
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read())
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError, ssl.SSLError) as e:
+        except (urllib.error.URLError, urllib.error.HTTPError,
+                TimeoutError, ConnectionError, OSError, ssl.SSLError) as e:
             if attempt == max_retries - 1:
                 print(f"\n  [ERROR] Network Failure on {method} {path}: {str(e)}")
                 raise e
-            wait = 1.0 * (attempt + 1)
+            wait = 2.0 * (attempt + 1)
             print(f"\n  [RETRY] Network Hiccup ({str(e)}). Retrying in {wait}s... ({attempt + 1}/{max_retries})")
             time.sleep(wait)
     return {}
@@ -55,6 +56,26 @@ def _post(path: str, body: dict = None) -> dict:
 
 def _get(path: str) -> dict:
     return _request(path, method="GET")
+
+
+def wait_for_server(max_wait: int = 120) -> None:
+    """Poll /health until the server is up, before starting the episode."""
+    url = f"{ENV_BASE_URL}/health"
+    deadline = time.time() + max_wait
+    attempt = 0
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                if resp.status == 200:
+                    print(f"  [SERVER] Ready after {attempt} probe(s).")
+                    return
+        except Exception as e:
+            wait = min(5, attempt)
+            print(f"  [WAIT] Server not ready yet ({str(e)}). Retrying in {wait}s...")
+            time.sleep(wait)
+    raise RuntimeError(f"Server at {ENV_BASE_URL} did not become ready within {max_wait}s")
 
 
 # ─── System Prompt (MASTER DEBUGGER GUIDE) ─────────────────────────────────────
@@ -262,6 +283,9 @@ def run_episode() -> dict:
     print(f"\n{'='*60}")
     print(f"Model: {MODEL_NAME} | Watchdog: 25m")
     print(f"{'='*60}\n")
+
+    # ✅ Block until server is fully up (prevents startup race condition)
+    wait_for_server(max_wait=120)
 
     result = _post("/reset")
     obs    = result["observation"]
