@@ -395,7 +395,8 @@ class MLDebugEnv:
     def _make_obs(self, task: Dict, tool_result: Optional[Dict]) -> Observation:
         difficulty = task["difficulty"]
         loss_curve = tool_result.get("loss_curve", {"train": [], "val": []}) if tool_result else {"train": [], "val": []}
-        class_metrics = tool_result.get("class_metrics", {}) if tool_result else {}
+        class_metrics_raw = tool_result.get("class_metrics", {}) if tool_result else {}
+        class_metrics = {str(k): v for k, v in class_metrics_raw.items()}
         logs = tool_result.get("logs", []) if tool_result else []
         config = tool_result.get("config", {}) if tool_result else {}
         gpu_metrics = tool_result.get("gpu_metrics", {"memory_mb": [], "util_pct": []}) if tool_result else {"memory_mb": [], "util_pct": []}
