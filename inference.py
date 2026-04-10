@@ -99,7 +99,7 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
     tool_result = obs.get("tool_result")
     tool_result_str = json.dumps(tool_result)
 
-    user_msg = f"Task: {task_desc}\nStep: {obs.get('step_number', 0)+1}/5\nResult: {tool_result_str}\nNext? (JSON)"
+    user_msg = f"Task: {task_description}\nStep: {obs.get('step_number', 0)+1}/5\nResult: {tool_result_str}\nNext? (JSON)"
     messages.append({"role": "user", "content": user_msg})
 
     try:
