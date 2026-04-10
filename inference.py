@@ -167,32 +167,27 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
             temperature=0.1,
         )
         raw = response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"\n  ⚠️ LLM Failed: {e}. Falling back...")
-        return {
-            "action_type": "diagnose",
-            "diagnosis":   "LLM timeout.",
-            "fix_type":    "config_change",
-            "fix_detail":  "reduce learning rate",
-            "confidence":  0.1,
-        }
-
-    try:
-        return json.loads(raw)
-    except:
-        # Simple extraction for robustness
-        if "{" in raw and "}" in raw:
-            try:
-                return json.loads(raw[raw.find("{"):raw.rfind("}")+1])
-            except: pass
         
-        return {
-            "action_type": "diagnose",
-            "diagnosis":   "JSON parsing failed under time pressure.",
-            "fix_type":    "config_change",
-            "fix_detail":  "fix initialization or data labels",
-            "confidence":  0.1,
-        }
+        # 🛡️ Iron-Clad Cleaning: Extract first {...} block
+        if "{" in raw and "}" in raw:
+            raw = raw[raw.find("{"):raw.rfind("}")+1]
+        
+        action_data = json.loads(raw)
+        
+        # 🛡️ Action Guard: Ensure action_type exists
+        if not action_data or not isinstance(action_data, dict):
+            return {"action_type": "fetch_logs"}
+            
+        if "action_type" not in action_data:
+            # If they gave a diagnosis without action_type, assume they meant diagnose
+            if "diagnosis" in action_data: action_data["action_type"] = "diagnose"
+            else: action_data["action_type"] = "fetch_logs"
+            
+        return action_data
+
+    except Exception as e:
+        print(f"\n  ⚠️ Iron-Clad Fallback ({e}). Defaulting to fetch_logs.")
+        return {"action_type": "fetch_logs"}
 
 
 # ─── Episode Loop ──────────────────────────────────────────────────────────────
