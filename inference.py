@@ -296,11 +296,16 @@ def run_episode() -> dict:
     while not episode_done:
         task_desc = obs["description"]
         task_id   = obs["task_id"]
+        difficulty = obs["difficulty"]
         history   = []
+        task_step = 0
 
-        print(f"\n=== {task_id} ({obs['difficulty']}) ===")
+        print(f"\n=== {task_id} ({difficulty}) ===", flush=True)
+        # ── Validator-required structured output ──────────────────────────
+        print(f"[START] task={task_id}", flush=True)
 
         while True:
+            task_step += 1
             # Pass task_id for smart fallbacks
             action = get_agent_action(task_desc, history, obs, task_id)
             print(f"  [{time.time()-EPISODE_START_TIME:.0f}s] action={action.get('action_type')}", end="", flush=True)
@@ -310,8 +315,11 @@ def run_episode() -> dict:
             obs     = result["observation"]
             done    = result["done"]
             info    = result["info"]
+            step_score = reward["total"]
 
-            print(f" | score={reward['total']:.2f}")
+            print(f" | score={step_score:.2f}", flush=True)
+            # ── Per-step structured output ────────────────────────────────
+            print(f"[STEP] step={task_step} reward={step_score:.4f}", flush=True)
 
             history.append({
                 "user":      f"last_result={json.dumps(obs.get('tool_result', {}))}",
@@ -319,8 +327,11 @@ def run_episode() -> dict:
             })
 
             if done:
+                final_score = step_score
                 if action.get("action_type") == "diagnose":
-                    all_scores[obs["difficulty"]] = reward["total"]
+                    all_scores[difficulty] = final_score
+                # ── End-of-task structured output ─────────────────────────
+                print(f"[END] task={task_id} score={final_score:.4f} steps={task_step}", flush=True)
                 if info.get("episode_done"):
                     episode_done = True
                 break
