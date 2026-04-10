@@ -177,9 +177,8 @@ class MLDebugEnv:
                 feedback=f"Global episode budget exhausted after {self._episode_budget} steps. Score = 0.",
                 total=0.0,
             )
-            task_done, episode_done, info, next_obs = self._advance_or_end(reward, difficulty, task)
-            info["episode_done"] = episode_done
-            return next_obs, reward, task_done, info
+            done, info, next_obs = self._advance_or_end(reward, difficulty, task)
+            return next_obs, reward, done, info
 
         # ── Investigation action ──────────────────────────────────────────────
         if action.action_type != "diagnose":
