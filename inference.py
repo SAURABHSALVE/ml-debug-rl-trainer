@@ -38,22 +38,34 @@ client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 # ─── HTTP Helpers ───────────────────────────────────────────────────────────────
 
-def _post(path: str, body: dict = None) -> dict:
-    url  = f"{ENV_BASE_URL}{path}"
-    data = json.dumps(body or {}).encode()
-    req  = urllib.request.Request(
+def _request(path: str, method: str = "GET", body: dict = None) -> dict:
+    url = f"{ENV_BASE_URL}{path}"
+    data = json.dumps(body or {}).encode() if body else None
+    req = urllib.request.Request(
         url, data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        headers={"Content-Type": "application/json"} if data else {},
+        method=method,
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read())
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError) as e:
+            if attempt == max_retries - 1:
+                print(f"\n  ❌ Network Failure on {method} {path}: {str(e)}")
+                raise e
+            wait = 1.0 * (attempt + 1)
+            print(f"\n  ⚠️ Network Hiccup ({str(e)}). Retrying in {wait}s... ({attempt + 1}/{max_retries})")
+            time.sleep(wait)
+    return {}
 
+def _post(path: str, body: dict = None) -> dict:
+    return _request(path, method="POST", body=body)
 
 def _get(path: str) -> dict:
-    req = urllib.request.Request(f"{ENV_BASE_URL}{path}", method="GET")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read())
+    return _request(path, method="GET")
 
 
 # ─── System Prompt (DECISIVE MODE) ───────────────────────────────────────────────
