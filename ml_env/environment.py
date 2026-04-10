@@ -174,12 +174,18 @@ class MLDebugEnv:
 
         # ✅ Then check against limit (task-specific Sonic budget)
         if self._task_step >= self._episode_budget and action.action_type != "diagnose":
+            feedback = f"Global episode budget exhausted after {self._episode_budget} steps. Score = 0.25 (floor)."
+            difficulty = task["difficulty"]
+            self._scores[difficulty] = 0.25
             reward = Reward(
-                score=0.0,
-                breakdown={},
-                feedback=f"Global episode budget exhausted after {self._episode_budget} steps. Score = 0.",
-                total=0.0,
+                score=0.25,
+                breakdown={"timeout_floor": 0.25},
+                feedback=feedback,
+                total=0.25,
             )
+            # ✅ Record termination heartbeat even for timeouts
+            logger.info(f"[END] Task: {task['task_id']} | Status: Success | Final Score: 0.25")
+            
             task_done, episode_done, info, next_obs = self._advance_or_end(reward, difficulty, task)
             info["episode_done"] = episode_done
             return next_obs, reward, task_done, info

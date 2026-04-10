@@ -62,9 +62,10 @@ SYSTEM_PROMPT = """\
 You are an expert ML debugging agent. You have a STRICT 30-minute time limit for all evaluations.
 
 STRATEGY: EXTREME SPEED.
-1. Diagnose as soon as you have ANY lead. 
-2. Do NOT waste steps. Use 1-2 tools then DIAGNOSE.
-3. If you see 'latest_churn_flag', 'init_std=10.0', or 'grad_norm=0.0', DIAGNOSE IMMEDIATELY.
+1. You have EXACTLY 5 STEPS per task.
+2. On Step 5, you MUST choose the 'diagnose' tool and make your best guess.
+3. Diagnose as soon as you have ANY lead. (1-2 tools then DIAGNOSE).
+4. If you see 'latest_churn_flag', 'init_std=10.0', or 'grad_norm=0.0', DIAGNOSE IMMEDIATELY.
 
 TOOLS: fetch_logs, fetch_config, fetch_loss_curve, fetch_gpu_metrics, fetch_class_metrics.
 
@@ -99,7 +100,14 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
     tool_result = obs.get("tool_result")
     tool_result_str = json.dumps(tool_result)
 
-    user_msg = f"Task: {task_description}\nStep: {obs.get('step_number', 0)+1}/5\nResult: {tool_result_str}\nNext? (JSON)"
+    step_num = obs.get('step_number', 0) + 1
+    
+    # FORCED DECISION: On step 5, we MUST diagnose.
+    if step_num >= 5:
+         print(f"  🎯 Last Step Trigger: Forcing diagnosis.")
+         user_msg = f"Task: {task_description}\nStep: {step_num}/5\nResult: {tool_result_str}\nFINAL STEP: YOU MUST DIAGNOSE NOW."
+    else:
+         user_msg = f"Task: {task_description}\nStep: {step_num}/5\nResult: {tool_result_str}\nNext? (JSON)"
     messages.append({"role": "user", "content": user_msg})
 
     try:
