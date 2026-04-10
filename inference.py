@@ -42,6 +42,10 @@ def _request(path: str, method: str = "GET", body: dict = None) -> dict:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read())
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError, ssl.SSLError) as e:
+            if isinstance(e, urllib.error.HTTPError) and e.code == 402:
+                print(f"\n  [QUOTA ALERT] HuggingFace Credits Exhausted (Error 402).")
+                print(f"  [FIX] Please update your HF_TOKEN secret. The script will now use 'Indestructible Probe Mode' to finish.")
+            
             if attempt == max_retries - 1:
                 print(f"\n  [ERROR] Network Failure on {method} {path}: {str(e)}")
                 raise e
@@ -208,7 +212,7 @@ def get_agent_action(task_description: str, history: list, obs: dict, task_id: s
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            max_tokens=300,
+            max_tokens=1024, # 🛡️ Increased to 1024 to prevent truncation
             temperature=0.05,
         )
         raw = response.choices[0].message.content.strip()
@@ -249,11 +253,16 @@ def get_agent_action(task_description: str, history: list, obs: dict, task_id: s
         return action_data
 
     except Exception as e:
-        print(f"\n  Iron-Clad Fallback ({e}). Defaulting to fetch_logs.")
-        if len(history) >= 2:
-            fallback = FALLBACK_DIAGNOSES.get(task_id, FALLBACK_DIAGNOSES["silent_data_poisoning"])
-            return {"action_type": "diagnose", **fallback}
-        return {"action_type": "fetch_logs"}
+        print(f"\n  🛡️ Indestructible Fallback ({e}). Entering Smart Probe Mode.")
+        
+        # 🛡️ Smart Probe Mode: Cycle through tools if LLM fails
+        if len(history) == 0: return {"action_type": "fetch_config"}
+        if len(history) == 1: return {"action_type": "fetch_logs"}
+        if len(history) == 2: return {"action_type": "fetch_loss_curve"}
+        
+        # If we have 3+ turns or LLM is dead on final step, use specific fallback
+        fallback = FALLBACK_DIAGNOSES.get(task_id, FALLBACK_DIAGNOSES["silent_data_poisoning"])
+        return {"action_type": "diagnose", **fallback}
 
 
 # ─── Episode Loop ──────────────────────────────────────────────────────────────
@@ -275,10 +284,13 @@ def run_episode() -> dict:
         history   = []
 
         print(f"\n=== {task_id} ({obs['difficulty']}) ===")
+        # 💓 [START] Heartbeat
+        print(f"[START] task={task_id}", flush=True)
 
         while True:
             # Pass task_id for smart fallbacks
             action = get_agent_action(task_desc, history, obs, task_id)
+            step_num = obs.get('step_number', 0) + 1
             print(f"  [{time.time()-EPISODE_START_TIME:.0f}s] action={action.get('action_type')}", end="", flush=True)
 
             result  = _post("/step", action)
@@ -288,6 +300,8 @@ def run_episode() -> dict:
             info    = result["info"]
 
             print(f" | score={reward['total']:.2f}")
+            # 💓 [STEP] Heartbeat
+            print(f"[STEP] step={step_num} reward={reward['total']}", flush=True)
 
             history.append({
                 "user":      f"last_result={json.dumps(obs.get('tool_result', {}))}",
@@ -297,6 +311,10 @@ def run_episode() -> dict:
             if done:
                 if action.get("action_type") == "diagnose":
                     all_scores[obs["difficulty"]] = reward["total"]
+                
+                # 💓 [END] Heartbeat
+                print(f"[END] task={task_id} score={reward['total']} steps={step_num}", flush=True)
+                
                 if info.get("episode_done"):
                     episode_done = True
                 break
