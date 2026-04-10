@@ -172,8 +172,8 @@ class MLDebugEnv:
         self._task_step += 1
         self._episode_steps += 1
 
-        # ✅ Then check against limit (global episode limit)
-        if self._episode_steps > self._episode_budget and action.action_type != "diagnose":
+        # ✅ Then check against limit (task-specific Sonic budget)
+        if self._task_step >= self._episode_budget and action.action_type != "diagnose":
             reward = Reward(
                 score=0.0,
                 breakdown={},
