@@ -129,6 +129,8 @@ class MLDebugEnv:
 
         return self._load_task(self._tasks[0])
 
+    def _load_task(self, task: Dict[str, Any]) -> Observation:
+        self._current_task = task
         # ✅ EXTREME SPEED: Reduce budget to 5 steps
         self._episode_budget = task.get("max_steps", 5)
         self._task_step = 0
