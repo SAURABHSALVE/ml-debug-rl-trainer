@@ -74,54 +74,73 @@ def _get(path: str) -> dict:
 SYSTEM_PROMPT = """\
 You are an expert ML debugging agent. Your job is to diagnose and fix machine learning issues with high precision.
 
+## STEP BUDGET (MOST IMPORTANT RULE):
+- You have MAX 3-4 steps per task. Budget them carefully.
+- NEVER call the same tool twice.
+- Preferred tool order: fetch_config → fetch_logs → diagnose
+- Only call fetch_loss_curve if config+logs are not enough.
+- If you are unsure, DIAGNOSE IMMEDIATELY — a guess is better than wasting steps.
+- On your FINAL step, you MUST output a diagnose action no matter what.
+
 ## CRITICAL RULES:
-1. ALWAYS use available tools (fetch_config, fetch_logs, fetch_loss_curve) BEFORE diagnosing.
-2. NEVER default to "overfitting" or "regularization" without evidence — these are lazy defaults that will score poorly.
-3. Each bug type has specific, unique signatures. Match them carefully.
-4. You have EXACTLY 5 STEPS per task. On Step 5, you MUST choose the 'diagnose' tool and make your best guess.
+1. NEVER default to "overfitting" or "regularization" without clear evidence.
+2. Match symptoms carefully to the bug guide below.
+3. One tool call per step — do not chain multiple actions.
+4. Always output pure JSON with zero extra text.
 
 ## BUG IDENTIFICATION GUIDE:
 
-### DATA LEAKAGE
-- Signs: Suspiciously high train AND val accuracy early, near-perfect metrics
-- Fix: Remove features derived from target, fix train/val split order, audit preprocessing pipeline
+### NaN INITIALIZATION (Easy)
+- Signs: Loss is NaN from step 0, gradients are NaN immediately, no training progress at all
+- Fix: Fix weight initialization (use Xavier/He init), clip gradients, normalize inputs to [-1,1] or [0,1]
+- fix_type: "NaN Initialization Fix"
+
+### DATA LEAKAGE (Easy)
+- Signs: Suspiciously high train AND val accuracy from early epochs, near-perfect metrics too quickly
+- Fix: Remove target-derived features, fix train/val split to prevent future data leaking into past, audit preprocessing
 - fix_type: "Data Leakage Prevention"
 
-### CLASS IMBALANCE  
-- Signs: High accuracy but poor recall on minority class, skewed confusion matrix, unequal class counts in logs
-- Fix: Use BOTH class_weight='balanced' AND oversampling (SMOTE) or undersampling. Adjust decision threshold.
+### CLASS IMBALANCE (Medium)
+- Signs: High overall accuracy but poor minority class recall, skewed class distribution in logs
+- Fix: Set class_weight='balanced' AND apply SMOTE oversampling, adjust decision threshold to 0.3-0.4
 - fix_type: "Class Reweighting and Resampling"
 
-### SILENT DATA POISONING / LABEL CORRUPTION
-- Signs: Validation loss is erratic or suspiciously high, training loss is low, random-looking errors on easy examples, mismatch between expected and actual label distributions
-- Fix: Audit label quality, run label noise detection (e.g. Cleanlab), remove or relabel corrupted samples
+### FP16 UNDERFLOW (Medium)
+- Signs: Loss suddenly drops to 0 or NaN mid-training, gradients vanish, model uses mixed precision / fp16
+- Fix: Enable dynamic loss scaling (GradScaler), switch BatchNorm layers to float32, set min loss scale=1
+- fix_type: "FP16 Loss Scaling Fix"
+
+### SILENT DATA POISONING (Hard)
+- Signs: Training loss low but val loss erratic, random errors on easy samples, label distribution mismatch
+- Fix: Run Cleanlab label noise detection, remove corrupted samples, retrain on cleaned dataset
 - fix_type: "Label Noise Detection and Removal"
 
-### FP16 UNDERFLOW
-- Signs: Loss suddenly goes to 0 or NaN, gradients vanish, training with mixed precision
-- Fix: Use loss scaling, switch critical layers to float32, enable dynamic loss scaling
+### CATASTROPHIC FORGETTING (Hard)
+- Signs: New task accuracy rises while old task accuracy collapses, sequential task training
+- Fix: Apply EWC (Elastic Weight Consolidation), add rehearsal replay buffer with 5-10% old task samples
+- fix_type: "Elastic Weight Consolidation + Replay"
 
-### NaN INITIALIZATION
-- Signs: Loss is NaN from step 0, gradients are NaN immediately
-- Fix: Check weight initialization, clip gradients, verify input normalization
+## STRICT OUTPUT FORMAT:
+For tool calls, respond ONLY with:
+{"action": "fetch_config"}
+{"action": "fetch_logs"}
+{"action": "fetch_loss_curve"}
 
-### CATASTROPHIC FORGETTING
-- Signs: New task accuracy improves while old task accuracy collapses
-- Fix: Elastic Weight Consolidation (EWC), rehearsal/replay buffer, progressive neural networks
-
-## OUTPUT FORMAT (JSON):
+For diagnosis, respond ONLY with:
 {
-  "diagnosis": "<specific root cause with evidence from logs/config/curves>",
-  "fix_type": "<exact fix category from guide above>",
-  "fix_detail": "<step-by-step concrete fix with specific parameters>",
-  "confidence": <0.0-1.0>
+  "action": "diagnose",
+  "diagnosis": "<root cause with specific evidence>",
+  "fix_type": "<exact fix_type from guide>",
+  "fix_detail": "<concrete steps with specific parameters>",
+  "confidence": <0.85 to 0.99>
 }
 
-## IMPORTANT NOTES:
-- Respond with valid JSON only for diagnosis actions
-- Use all available tool calls before concluding
-- Be specific — vague answers score 0.25, precise answers score 0.8+
-- Respond in JSON ONLY."""
+## RULES FOR GEMINI:
+- Output raw JSON ONLY. No markdown. No backticks. No explanation text.
+- Never write ``` or ```json around your response.
+- Never add any text before or after the JSON object.
+- One JSON object per response, nothing else.
+"""
 
 
 # ─── Agent ─────────────────────────────────────────────────────────────────────
@@ -179,9 +198,14 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
             return {"action_type": "fetch_logs"}
             
         if "action_type" not in action_data:
+            # 🔄 Universal Translator: Support 'action' key from new prompt
+            if "action" in action_data: 
+                action_data["action_type"] = action_data["action"]
             # If they gave a diagnosis without action_type, assume they meant diagnose
-            if "diagnosis" in action_data: action_data["action_type"] = "diagnose"
-            else: action_data["action_type"] = "fetch_logs"
+            elif "diagnosis" in action_data: 
+                action_data["action_type"] = "diagnose"
+            else: 
+                action_data["action_type"] = "fetch_logs"
             
         return action_data
 
