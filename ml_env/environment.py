@@ -132,8 +132,8 @@ class MLDebugEnv:
 
     def _load_task(self, task: Dict[str, Any]) -> Observation:
         self._current_task = task
-        # ✅ EXTREME SPEED: Reduce budget to 5 steps
-        self._episode_budget = task.get("max_steps", 5)
+        # ✅ RESTORE: Use 16-step global budget (standard for "Senior MLE" depth)
+        self._episode_budget = 16
         self._task_step = 0
         self._action_history = []
         self._revealed_data = {}
@@ -302,7 +302,8 @@ class MLDebugEnv:
         info["episode_done"] = episode_done
         self._last_obs = next_obs
 
-        return next_obs, reward, task_done, info
+        # ✅ FIX: Return episode_done as the 3rd value (gym/OpenEnv standard)
+        return next_obs, reward, episode_done, info
 
     # ─── Tool Handlers ─────────────────────────────────────────────────────────
 
@@ -476,18 +477,20 @@ class MLDebugEnv:
 
     def list_tasks(self) -> List[Dict[str, Any]]:
         """
-        Return task ID, difficulty, description, and grader info for ALL 6 tasks.
+        Return task ID, difficulty, description, and grader info for tasks in the CURRENT episode.
         """
-        all_tasks = []
-        for difficulty, generators in TASK_POOL.items():
-            for gen in generators:
-                t = gen(seed=42) # Seed doesn't change metadata
-                all_tasks.append({
-                    "task_id": t["task_id"],
-                    "difficulty": t["difficulty"],
-                    "description": t["description"],
-                    "has_grader": True,
-                    "grader": "grader:grade",
-                    "bug_type": t["ground_truth"]["bug_type"],
-                })
-        return all_tasks
+        # ✅ FIX: Return the active 3 tasks to match OpenEnv expectations and tests
+        if not self._tasks:
+            return []
+            
+        tasks = []
+        for t in self._tasks:
+            tasks.append({
+                "task_id": t["task_id"],
+                "difficulty": t["difficulty"],
+                "description": t["description"],
+                "has_grader": True,
+                "grader": "grader:grade",
+                "bug_type": t["ground_truth"]["bug_type"],
+            })
+        return tasks

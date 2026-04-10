@@ -5,12 +5,13 @@ Each task returns a scenario dict with:
   - data          : the raw data (logs, config, curves, gpu, class_metrics)
   - ground_truth  : what the correct answer is (hidden from agent)
 
-Task catalogue (5 tasks, 3 selected per episode):
-  1. overfitting_detection  (easy)
-  2. lr_explosion           (medium)
-  3. silent_data_poisoning  (hard)
+Task catalogue (6 real-world ML scenarios, 3 selected randomly per episode):
+  1. data_leakage           (easy)
+  2. nan_init               (easy)
+  3. fp16_underflow         (medium)
   4. class_imbalance        (medium)
-  5. catastrophic_forgetting (hard)
+  5. silent_data_poisoning  (hard)
+  6. catastrophic_forgetting (hard)
 """
 
 import random

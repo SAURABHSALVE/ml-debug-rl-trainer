@@ -233,7 +233,7 @@ class TestAPI:
     def test_reset(self):
         resp = client.post("/reset")
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["observation"]
         assert data["difficulty"] == "easy"
         assert data["step_number"] == 0
         assert data["tool_result"] is None
