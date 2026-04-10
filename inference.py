@@ -18,6 +18,7 @@ import json
 import os
 import time
 import urllib.request
+import ssl
 import signal
 
 from openai import OpenAI
