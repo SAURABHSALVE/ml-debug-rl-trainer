@@ -104,7 +104,7 @@ def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
     
     # FORCED DECISION: On step 5, we MUST diagnose.
     if step_num >= 5:
-         print(f"  🎯 Last Step Trigger: Forcing diagnosis.")
+         print(f"  [FORCE] Last Step Trigger: Forcing diagnosis.")
          user_msg = f"Task: {task_description}\nStep: {step_num}/5\nResult: {tool_result_str}\nFINAL STEP: YOU MUST DIAGNOSE NOW."
     else:
          user_msg = f"Task: {task_description}\nStep: {step_num}/5\nResult: {tool_result_str}\nNext? (JSON)"
