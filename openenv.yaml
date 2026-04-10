@@ -167,7 +167,7 @@ tasks:
     score_range: [0.0, 1.0]
     bug_type: data_leakage
     model: XGBoostClassifier
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: nan_init
     name: "BERT NaN Weight Initialization"
@@ -176,7 +176,7 @@ tasks:
     score_range: [0.0, 1.0]
     bug_type: bad_initialization
     model: BERT-small-custom
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: fp16_underflow
     name: "Llama-3 FP16 Gradient Underflow"
@@ -185,7 +185,7 @@ tasks:
     score_range: [0.0, 1.0]
     bug_type: fp16_underflow
     model: Llama-3-8B-LoRA
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: class_imbalance
     name: "Medical X-Ray Class Imbalance"
@@ -194,7 +194,7 @@ tasks:
     score_range: [0.0, 1.0]
     bug_type: class_imbalance
     model: MobileNetV2
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: silent_data_poisoning
     name: "Manufacturing Defects Data Poisoning"
@@ -205,7 +205,7 @@ tasks:
     model: EfficientNet-B0
     max_steps: 5
     pool_slot: hard
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
   - id: catastrophic_forgetting
     name: "ResNet-50 Catastrophic Forgetting"
@@ -216,7 +216,7 @@ tasks:
     model: ResNet-50 (pretrained)
     max_steps: 5
     pool_slot: hard
-    grader: ml_env.graders:grade_task
+    grader: grader:grade
 
 episode:
   tasks_per_episode: 3

@@ -461,7 +461,7 @@ class MLDebugEnv:
                     "difficulty": t["difficulty"],
                     "description": t["description"],
                     "has_grader": True,
-                    "grader": t["grader"].__name__,
+                    "grader": "grader:grade",
                     "bug_type": t["ground_truth"]["bug_type"],
                 })
         return all_tasks
