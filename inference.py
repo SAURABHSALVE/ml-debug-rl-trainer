@@ -25,13 +25,14 @@ from openai import OpenAI
 # ─── Config ────────────────────────────────────────────────────────────────────
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME   = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.3-70B-Instruct")
+# Switch to 8B for extreme speed to beat the 30min timeout
+MODEL_NAME   = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 HF_TOKEN     = os.environ.get("HF_TOKEN", "")
 ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
 
 # GLOBAL START TIME for 30-min kill safety
 EPISODE_START_TIME = time.time()
-TIMEOUT_LIMIT      = 25 * 60  # 25 minutes (safe buffer)
+TIMEOUT_LIMIT      = 25 * 60  # 25 minutes buffer
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
@@ -45,88 +46,67 @@ def _post(path: str, body: dict = None) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    # Increased safety with explicit timeout
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())
 
 
 def _get(path: str) -> dict:
     req = urllib.request.Request(f"{ENV_BASE_URL}{path}", method="GET")
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())
 
 
 # ─── System Prompt (DECISIVE MODE) ───────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You are an expert ML debugging agent. You have a STRICT 30-minute time limit for all 3 tasks.
+You are an expert ML debugging agent. You have a STRICT 30-minute time limit for all evaluations.
 
-STRATEGY: SPEED OVER CURIOSITY.
-1. Diagnose as soon as you have a high-confidence lead (0.7+). 
-2. Do NOT waste steps. Each tool call takes time and adds up.
+STRATEGY: EXTREME SPEED.
+1. Diagnose as soon as you have ANY lead. 
+2. Do NOT waste steps. Use 1-2 tools then DIAGNOSE.
 3. If you see 'latest_churn_flag', 'init_std=10.0', or 'grad_norm=0.0', DIAGNOSE IMMEDIATELY.
 
-INVESTIGATION TOOLS (cost 1 step):
-  {"action_type": "fetch_logs",        "start_epoch": 1, "end_epoch": 10}
-  {"action_type": "fetch_config",      "keys": ["lr", "dropout", "optimizer"]}
-  {"action_type": "fetch_loss_curve",  "split": "val"}
-  {"action_type": "fetch_gpu_metrics"}
-  {"action_type": "fetch_class_metrics", "class_id": 0}
+TOOLS: fetch_logs, fetch_config, fetch_loss_curve, fetch_gpu_metrics, fetch_class_metrics.
 
-TERMINAL ACTION (call as early as possible):
-  {
-    "action_type": "diagnose",
-    "diagnosis":   "Root cause explanation...",
-    "fix_type":    "config_change | data_fix | architecture_change",
-    "fix_detail":  "Exact fix with values...",
-    "confidence":  0.9
-  }
+TERMINAL ACTION:
+  {"action_type": "diagnose", "diagnosis": "...", "fix_type": "...", "fix_detail": "...", "confidence": 0.9}
 
-RULES:
-  ✅ DIAGNOSE ASAP to beat the 30-minute timer.
-  ✅ Be SPECIFIC with fixed values.
-  ❌ No repeated tools.
-  ❌ No idle talk. Respond with JSON ONLY."""
+Respond with JSON ONLY."""
 
 
 # ─── Agent ─────────────────────────────────────────────────────────────────────
 
 def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
-    """Ask the LLM for the next action, with a failsafe for time limit."""
+    """Ask the LLM for the next action, with extreme speed optimization."""
     
-    # EMERGENCY EXIT: If we are past 25 minutes, force a diagnosis to save the run.
     elapsed = time.time() - EPISODE_START_TIME
     if elapsed > TIMEOUT_LIMIT:
-        print(f"\n  🕒 WARNING: Time limit approach ({elapsed:.0f}s). Forcing emergency diagnosis.")
+        print(f"\n  🕒 Watchdog: Forcing emergency diagnosis.")
         return {
             "action_type": "diagnose",
-            "diagnosis":   f"Emergency diagnosis triggered by 25-minute watchdog. Evidence collected: {obs.get('action_history', [])}",
+            "diagnosis":   "Emergency exit.",
             "fix_type":    "config_change",
-            "fix_detail":  "Lower learning rate, check initialization, or audit data labeling based on available logs.",
+            "fix_detail":  "lower learning rate",
             "confidence":  0.3,
         }
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for h in history[-3:]: # Further reduced to 3 for speed
+    # EXTREME optimization: Keep ONLY the last turn
+    for h in history[-1:]:
         messages.append({"role": "user",      "content": h["user"]})
         messages.append({"role": "assistant", "content": h["assistant"]})
 
     tool_result = obs.get("tool_result")
-    tool_result_str = json.dumps(tool_result, indent=2) if tool_result else "None yet"
+    tool_result_str = json.dumps(tool_result)
 
-    user_msg = (
-        f"TASK: {task_description}\n"
-        f"Steps: {obs.get('step_number', 0)+1}/10 | Time: {elapsed:.0f}s\n"
-        f"Last result: {tool_result_str}\n"
-        f"What is your next action? (JSON ONLY)"
-    )
+    user_msg = f"Task: {task_desc}\nStep: {obs.get('step_number', 0)+1}/5\nResult: {tool_result_str}\nNext? (JSON)"
     messages.append({"role": "user", "content": user_msg})
 
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            max_tokens=384, # Reduced from 512 for speed
+            max_tokens=256, # Minimum necessary
             temperature=0.1,
         )
         raw = response.choices[0].message.content.strip()

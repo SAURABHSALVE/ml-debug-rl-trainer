@@ -129,10 +129,8 @@ class MLDebugEnv:
 
         return self._load_task(self._tasks[0])
 
-    def _load_task(self, task: Dict[str, Any]) -> Observation:
-        self._current_task = task
-        # ✅ SPEED OPTIMIZATION: Reduce budget to 10 steps
-        self._episode_budget = task.get("max_steps", 10)
+        # ✅ EXTREME SPEED: Reduce budget to 5 steps
+        self._episode_budget = task.get("max_steps", 5)
         self._task_step = 0
         self._action_history = []
         self._revealed_data = {}
@@ -330,8 +328,10 @@ class MLDebugEnv:
             if (end - start + 1) > 100:
                 start = max(1, end - 99)
             
-            result = data["logs"][start - 1 : end]
-            return {"logs": result, "count": len(result)}, intermediate_reward
+            # ✅ RADICAL OPTIMIZATION: Return only Head (10) and Tail (10) for small payloads
+            head = data["logs"][:10]
+            tail = data["logs"][-10:] if len(data["logs"]) > 20 else []
+            return {"logs_head": head, "logs_tail": tail, "total_lines": len(data["logs"])}, intermediate_reward
 
         elif tool == "fetch_config":
             keys = action.keys or list(data["config"].keys())
