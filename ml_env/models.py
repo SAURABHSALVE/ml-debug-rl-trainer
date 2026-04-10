@@ -42,6 +42,10 @@ class Reward(BaseModel):
     efficiency_bonus: float = Field(default=0.0, ge=0.0, le=0.05)
     trajectory_bonus: float = Field(default=0.0, ge=0.0, le=0.05)
     path_bonus: float = Field(default=0.0, ge=0.0, le=0.1)
+    graded: bool = False
+
+    class Config:
+        extra = "allow"
 
 
 class Observation(BaseModel):
