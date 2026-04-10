@@ -88,6 +88,7 @@ class MLDebugEnv:
 
         # ✅ FIX: Pre-generate tasks at init so list_tasks() works before reset()
         self._tasks: List[Dict[str, Any]] = self._generate_task_set(seed)
+        self._last_obs: Optional[Observation] = None
 
     # ─── Task Generation ───────────────────────────────────────────────────────
 
@@ -139,7 +140,7 @@ class MLDebugEnv:
         self._called_tools = []
         difficulty = task["difficulty"]
 
-        return Observation(
+        obs = Observation(
             task_id=task["task_id"],
             difficulty=difficulty,
             description=task["description"],
@@ -155,6 +156,8 @@ class MLDebugEnv:
             action_history=[],
             available_tools=AVAILABLE_TOOLS,
         )
+        self._last_obs = obs
+        return obs
 
     # ─── Step ──────────────────────────────────────────────────────────────────
 
@@ -193,6 +196,7 @@ class MLDebugEnv:
                 total=intermediate_reward,
             )
             obs = self._make_obs(task, tool_result=tool_result)
+            self._last_obs = obs
             return obs, reward, False, {"task_step": self._task_step}
 
         # ── Diagnose (terminal) ───────────────────────────────────────────────
@@ -290,6 +294,7 @@ class MLDebugEnv:
 
         task_done, episode_done, info, next_obs = self._advance_or_end(reward, difficulty, task)
         info["episode_done"] = episode_done
+        self._last_obs = next_obs
 
         return next_obs, reward, task_done, info
 
@@ -441,11 +446,6 @@ class MLDebugEnv:
             "scores": self._scores,
             "average_score": round(avg_score, 3),
         }, self._last_obs
-        return True, {
-            "episode_complete": True,
-            "scores": self._scores,
-            "average_score": round(avg_score, 3),
-        }, final_obs
 
     # ─── State ─────────────────────────────────────────────────────────────────
 
