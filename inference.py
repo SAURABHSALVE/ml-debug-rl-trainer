@@ -52,12 +52,12 @@ def _request(path: str, method: str = "GET", body: dict = None) -> dict:
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return json.loads(resp.read())
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError) as e:
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError, ssl.SSLError) as e:
             if attempt == max_retries - 1:
-                print(f"\n  ❌ Network Failure on {method} {path}: {str(e)}")
+                print(f"\n  [ERROR] Network Failure on {method} {path}: {str(e)}")
                 raise e
             wait = 1.0 * (attempt + 1)
-            print(f"\n  ⚠️ Network Hiccup ({str(e)}). Retrying in {wait}s... ({attempt + 1}/{max_retries})")
+            print(f"\n  [RETRY] Network Hiccup ({str(e)}). Retrying in {wait}s... ({attempt + 1}/{max_retries})")
             time.sleep(wait)
     return {}
 
