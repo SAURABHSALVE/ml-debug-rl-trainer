@@ -85,11 +85,11 @@ def _post(path: str, body: dict = None) -> dict:
     return _request(path, method="POST", body=body)
 
 
-def wait_for_server(max_wait: int = 30) -> bool:
+def wait_for_server(max_wait: int = 8) -> bool:
     """
     Poll /health for up to max_wait seconds.
     Returns True if server responded 200, False otherwise.
-    Kept SHORT (30s) so we don't burn the validator's timeout budget.
+    Kept SHORT (8s) so we don't burn the validator's timeout budget.
     """
     url      = f"{ENV_BASE_URL}/health"
     deadline = time.time() + max_wait
@@ -98,7 +98,7 @@ def wait_for_server(max_wait: int = 30) -> bool:
         probe += 1
         try:
             req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=4) as resp:
+            with urllib.request.urlopen(req, timeout=2) as resp:
                 if resp.status == 200:
                     _out(f"  [SERVER] Ready (probe #{probe})")
                     return True
@@ -106,7 +106,7 @@ def wait_for_server(max_wait: int = 30) -> bool:
             remaining = max(0, deadline - time.time())
             if remaining < 1:
                 break
-            wait = min(3, remaining, probe)
+            wait = min(2, remaining, probe)
             _out(f"  [WAIT] probe#{probe}: {e} — retry in {wait:.0f}s")
             time.sleep(wait)
     _out(f"  [SERVER] Not reachable after {max_wait}s — using fallback output.")
@@ -287,7 +287,7 @@ def run_episode() -> dict:
     _out(f"Model: {MODEL_NAME}")
     _out("=" * 60)
 
-    server_ok = wait_for_server(max_wait=30)
+    server_ok = wait_for_server(max_wait=8)
 
     # ── No server: emit static structured output immediately ──────────────────
     if not server_ok:

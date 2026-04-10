@@ -7,7 +7,7 @@ Run: pytest tests/ -v
 import pytest
 from fastapi.testclient import TestClient
 
-from app import app
+from server.app import app
 from ml_env.environment import MLDebugEnv
 from ml_env.graders import grade_data_leakage, grade_fp16_underflow, grade_data_poisoning, grade_class_imbalance, grade_forgetting, grade_nan_init
 from ml_env.models import Action
