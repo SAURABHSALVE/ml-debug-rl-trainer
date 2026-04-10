@@ -11,11 +11,6 @@ import urllib.request
 import urllib.error
 import ssl
 
-# ──────────────────────────────────────────────────────────────────────────────
-# CRITICAL: Use os.write(1, ...) for ALL structured output lines.
-# This is a raw OS syscall that bypasses every layer of Python buffering.
-# ──────────────────────────────────────────────────────────────────────────────
-
 def _out(msg: str) -> None:
     """Write msg + newline directly to stdout file-descriptor — cannot be buffered."""
     try:
@@ -31,13 +26,12 @@ def _out(msg: str) -> None:
 # ─── Config ────────────────────────────────────────────────────────────────────
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
-# FIX 1: Changed from Llama-3.1-8B to Llama-3.3-70B — much stronger reasoning
 MODEL_NAME   = os.environ.get("MODEL_NAME",   "meta-llama/Llama-3.3-70B-Instruct")
 HF_TOKEN     = os.environ.get("HF_TOKEN",     "")
 ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
 
 EPISODE_START_TIME = time.time()
-TIMEOUT_LIMIT      = 25 * 60   # 25-minute hard cap
+TIMEOUT_LIMIT      = 25 * 60
 
 
 # ─── Lazy OpenAI client ────────────────────────────────────────────────────────
@@ -86,10 +80,9 @@ def _post(path: str, body: dict = None) -> dict:
 
 
 def wait_for_server(max_wait: int = 8) -> bool:
-    """Poll /health for up to max_wait seconds."""
-    url = f"{ENV_BASE_URL}/health"
+    url      = f"{ENV_BASE_URL}/health"
     deadline = time.time() + max_wait
-    probe = 0
+    probe    = 0
     while time.time() < deadline:
         probe += 1
         try:
@@ -104,8 +97,6 @@ def wait_for_server(max_wait: int = 8) -> bool:
 
 
 # ─── Fallback Diagnoses ────────────────────────────────────────────────────────
-# FIX 4: fix_type values now use the correct grader keywords:
-# config_change | data_fix | architecture_change
 
 FALLBACK = {
     "data_leakage": {
@@ -162,13 +153,13 @@ def _emit_fallback_task(task_id: str, diff: str, bug_type: str) -> float:
 
 
 # ─── System Prompt ─────────────────────────────────────────────────────────────
-# FIX 3: Full task-specific strategies + correct fix_type values
 
 SYSTEM_PROMPT = """\
 You are an expert ML debugging agent. Output ONLY valid JSON. No markdown. No backticks.
 
 WARNING: Calling diagnose with 0 investigation steps cuts your score by 80%.
 Always call at least 1 investigation tool before diagnosing.
+Once you call diagnose, the task ends. Do NOT call diagnose more than once per task.
 
 INVESTIGATION TOOLS:
   {"action_type": "fetch_config",        "keys": ["lr", "init_std", "fp16", "dropout"]}
@@ -177,7 +168,7 @@ INVESTIGATION TOOLS:
   {"action_type": "fetch_class_metrics", "class_id": 0}
   {"action_type": "fetch_gpu_metrics"}
 
-TERMINAL ACTION:
+TERMINAL ACTION (ends the task — call only once when confident):
   {"action_type": "diagnose", "diagnosis": "...", "fix_type": "config_change|data_fix|architecture_change", "fix_detail": "...", "confidence": 0.9}
 
 STRATEGY BY TASK:
@@ -214,8 +205,10 @@ STRATEGY BY TASK:
 
 RULES:
   ✅ fix_type MUST be exactly one of: config_change, data_fix, architecture_change
+  ✅ Call diagnose ONLY ONCE — it ends the task immediately
   ✅ Be specific — name exact values, exact class IDs, exact config keys
   ❌ Never repeat the same tool call
+  ❌ Never call diagnose more than once per task
   ❌ Never output anything except a single JSON object
 """
 
@@ -227,21 +220,18 @@ def get_agent_action(task_desc: str, history: list, obs: dict, task_id: str) -> 
     if elapsed > TIMEOUT_LIMIT:
         return {"action_type": "diagnose", **FALLBACK.get(task_id, DEFAULT_FALLBACK)}
 
-    step_num = obs.get("step_number", 0) + 1
-
-    # FIX 2: Removed hard step_num >= 4 cutoff that forced fallback.
-    # Now the agent runs until the environment says done=True.
-    # Only force fallback if we are dangerously close to the step budget.
     steps_remaining = obs.get("steps_remaining", 99)
     if steps_remaining <= 1:
         return {"action_type": "diagnose", **FALLBACK.get(task_id, DEFAULT_FALLBACK)}
+
+    step_num = obs.get("step_number", 0) + 1
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     for h in history[-4:]:
         messages.append({"role": "user",      "content": h["user"]})
         messages.append({"role": "assistant", "content": h["assistant"]})
 
-    tool_result = obs.get("tool_result")
+    tool_result     = obs.get("tool_result")
     tool_result_str = json.dumps(tool_result, indent=2) if tool_result else "None yet"
 
     messages.append({"role": "user", "content": (
@@ -266,11 +256,10 @@ def get_agent_action(task_desc: str, history: list, obs: dict, task_id: str) -> 
             raw = raw[raw.find("{"):raw.rfind("}")+1]
         action = json.loads(raw)
 
-        # Normalize action_type key
         if "action_type" not in action:
-            if "action" in action:       action["action_type"] = action["action"]
-            elif "diagnosis" in action:  action["action_type"] = "diagnose"
-            else:                        action["action_type"] = "fetch_logs"
+            if "action" in action:      action["action_type"] = action["action"]
+            elif "diagnosis" in action: action["action_type"] = "diagnose"
+            else:                       action["action_type"] = "fetch_logs"
 
         return action
 
@@ -334,11 +323,13 @@ def run_episode() -> dict:
                 "assistant": json.dumps(action),
             })
 
-            if done:
+            # THE KEY FIX: stop immediately after diagnose — never let agent
+            # keep running and overwrite a good score with a worse one.
+            if action.get("action_type") == "diagnose" or done:
                 all_scores[difficulty] = score
                 _out(f"[END] task={task_id} score={score:.4f} steps={task_step}")
                 task_ended = True
-                if info.get("episode_done"):
+                if done and info.get("episode_done"):
                     episode_done = True
                 break
 
