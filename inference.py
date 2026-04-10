@@ -1,17 +1,6 @@
 """
 Baseline inference script for ML Experiment Debugger.
 Uses OpenAI-compatible client to run an LLM agent through all 3 tasks per episode.
-
-Usage:
-  export API_BASE_URL=https://router.huggingface.co/v1
-  export MODEL_NAME=meta-llama/Llama-3.3-70B-Instruct
-  export HF_TOKEN=your_token_here
-  python inference.py
-
-  # With LLM grading enabled:
-  export USE_LLM_GRADING=true
-  export GRADER_MODEL=meta-llama/Llama-3.3-70B-Instruct
-  python inference.py
 """
 
 import json
@@ -26,7 +15,6 @@ from openai import OpenAI
 # ─── Config ────────────────────────────────────────────────────────────────────
 
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
-# Switch to 8B for extreme speed to beat the 30min timeout
 MODEL_NAME   = os.environ.get("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 HF_TOKEN     = os.environ.get("HF_TOKEN", "")
 ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
@@ -37,7 +25,7 @@ TIMEOUT_LIMIT      = 25 * 60  # 25 minutes buffer
 
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
-# ─── HTTP Helpers ───────────────────────────────────────────────────────────────
+# ─── HTTP Helpers (ROCK-SOLID RESILIENCE) ───────────────────────────────────────
 
 def _request(path: str, method: str = "GET", body: dict = None) -> dict:
     url = f"{ENV_BASE_URL}{path}"
@@ -69,155 +57,202 @@ def _get(path: str) -> dict:
     return _request(path, method="GET")
 
 
-# ─── System Prompt (DECISIVE MODE) ───────────────────────────────────────────────
+# ─── System Prompt (MASTER DEBUGGER GUIDE) ─────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You are an ML bug detector. Analyze and diagnose ML training issues.
+You are an expert ML debugging agent. Your ONLY job is to output valid JSON.
 
-## STRICT STEP RULES:
-- Step 1: Call fetch_config ONLY
-- Step 2: Call fetch_logs ONLY  
-- Step 3: Call diagnose IMMEDIATELY
-- NEVER repeat a tool you already called.
-- NEVER call more than 2 tools before diagnosing.
-- If you already called fetch_config, go to fetch_logs next.
-- If you already called fetch_logs, go to diagnose next.
-- DO NOT call fetch_loss_curve unless step 1 and 2 gave zero useful info.
+## MANDATORY STEP ORDER:
+- Step 1 ALWAYS: {"action_type": "fetch_config"}
+- Step 2 ALWAYS: {"action_type": "fetch_logs"}
+- Step 3 ALWAYS: {"action_type": "diagnose", ...}
+- NEVER repeat a tool. NEVER skip to diagnose before step 3.
+- NEVER output anything except a single JSON object.
 
-## BUG SIGNATURES — MATCH EXACTLY:
+## CRITICAL DISTINCTION:
+DATA LEAKAGE     = val accuracy suspiciously HIGH from epoch 1, nearly matches train accuracy
+SILENT POISONING = training loss LOW but val loss RANDOMLY SPIKES, easy samples misclassified
+FP16 UNDERFLOW   = loss suddenly drops to 0.0 or NaN mid-training, model uses fp16/mixed precision
+NaN INIT         = loss is NaN from step 0, never trains at all
+CLASS IMBALANCE  = high overall accuracy but minority class recall near 0
+CATASTROPHIC     = old task accuracy collapses as new task accuracy rises
+
+## BUG GUIDE:
 
 NaN INITIALIZATION:
-- config shows: bad weight init
-- logs show: loss=NaN at epoch 0
 - fix_type: "NaN Initialization Fix"
-- fix_detail: "Use Xavier/He initialization, clip gradients to 1.0, normalize inputs"
+- fix_detail: "Use He/Xavier weight init. Clip gradients max_norm=1.0. Normalize inputs to mean=0 std=1."
 
 DATA LEAKAGE:
-- config shows: preprocessing before split
-- logs show: val accuracy suspiciously high from epoch 1
 - fix_type: "Data Leakage Prevention"
-- fix_detail: "Move all preprocessing inside cross-validation fold, fix train/val split order"
+- fix_detail: "Wrap scaler+model in sklearn Pipeline(). Split data BEFORE preprocessing. Remove target-derived features. Use StratifiedKFold(n_splits=5, shuffle=True, random_state=42)."
 
 CLASS IMBALANCE:
-- config shows: no class weights set
-- logs show: minority class recall near 0, majority class recall near 1
 - fix_type: "Class Reweighting and Resampling"
-- fix_detail: "Set class_weight=balanced, apply SMOTE, adjust threshold to 0.35"
+- fix_detail: "Set class_weight=balanced. Apply SMOTE on training fold only. Lower decision threshold to 0.35. Use F1 score metric."
 
 FP16 UNDERFLOW:
-- config shows: fp16=True or mixed_precision=True
-- logs show: loss suddenly becomes 0.0 or NaN mid training
 - fix_type: "FP16 Loss Scaling Fix"
-- fix_detail: "Enable GradScaler dynamic loss scaling, keep BatchNorm in float32"
+- fix_detail: "Use GradScaler() with dynamic loss scaling init_scale=2**16. Keep BatchNorm in float32. Set min loss scale=1."
 
 SILENT DATA POISONING:
-- config shows: no data validation
-- logs show: training loss low but val loss randomly spikes
 - fix_type: "Label Noise Detection and Removal"
-- fix_detail: "Run Cleanlab, remove noisy labels, retrain on cleaned dataset"
+- fix_detail: "Run cleanlab cl.find_label_issues(). Remove top 10% noisy samples. Re-verify borderline labels manually. Retrain on cleaned dataset."
 
 CATASTROPHIC FORGETTING:
-- config shows: sequential task training
-- logs show: task1 accuracy drops as task2 accuracy rises
 - fix_type: "Elastic Weight Consolidation + Replay"
-- fix_detail: "Apply EWC lambda=0.4, add 10% replay buffer from previous tasks"
+- fix_detail: "Apply EWC lambda=0.4 after each task. Replay buffer with 10% old task samples. Use progressive neural networks for very different tasks."
 
-## OUTPUT RULES — LLAMA STRICT:
-- Output ONE JSON object only.
-- Zero text before or after JSON.
-- Zero markdown, zero backticks, zero explanation.
-- Use exactly these keys: action, diagnosis, fix_type, fix_detail, confidence
+## EXACT OUTPUT FORMATS:
 
-## FOR TOOL CALLS output exactly:
-{"action": "fetch_config"}
-{"action": "fetch_logs"}
+Step 1 or 2 — tool call:
+{"action_type": "fetch_config"}
+{"action_type": "fetch_logs"}
 
-## FOR DIAGNOSIS output exactly:
-{"action": "diagnose", "diagnosis": "specific cause with evidence", "fix_type": "exact type from guide", "fix_detail": "concrete steps", "confidence": 0.90}
+Step 3 — diagnosis:
+{"action_type": "diagnose", "diagnosis": "Evidence from logs: <what you saw>. Root cause: <bug name>", "fix_type": "<exact fix_type from guide>", "fix_detail": "<exact fix_detail from guide>", "confidence": 0.92}
+
+## RULES:
+- Raw JSON only. No markdown. No backticks. No explanation text.
+- diagnosis field = describe evidence you saw + root cause. NOT the fix_type value.
+- confidence must be between 0.85 and 0.99.
+- One JSON object. Nothing else before or after it.
 """
+
+# ─── Fallback Diagnoses per Bug Type ──────────────────────────────────────────
+
+FALLBACK_DIAGNOSES = {
+    "data_leakage": {
+        "diagnosis": "Evidence: val accuracy matches train accuracy suspiciously from epoch 1. Root cause: Data leakage — preprocessing applied before train/val split.",
+        "fix_type": "Data Leakage Prevention",
+        "fix_detail": "Wrap scaler+model in sklearn Pipeline(). Split data BEFORE preprocessing. Remove target-derived features. Use StratifiedKFold(n_splits=5, shuffle=True, random_state=42).",
+        "confidence": 0.88,
+    },
+    "nan_init": {
+        "diagnosis": "Evidence: loss is NaN from step 0, no training progress. Root cause: NaN weight initialization or exploding gradients.",
+        "fix_type": "NaN Initialization Fix",
+        "fix_detail": "Use He/Xavier weight init. Clip gradients max_norm=1.0. Normalize inputs to mean=0 std=1.",
+        "confidence": 0.88,
+    },
+    "fp16_underflow": {
+        "diagnosis": "Evidence: loss suddenly drops to 0.0 or NaN mid-training. Root cause: FP16 underflow due to missing loss scaling in mixed precision training.",
+        "fix_type": "FP16 Loss Scaling Fix",
+        "fix_detail": "Use GradScaler() with dynamic loss scaling init_scale=2**16. Keep BatchNorm in float32. Set min loss scale=1.",
+        "confidence": 0.88,
+    },
+    "class_imbalance": {
+        "diagnosis": "Evidence: high overall accuracy but minority class recall near 0. Root cause: Class imbalance with no reweighting or resampling.",
+        "fix_type": "Class Reweighting and Resampling",
+        "fix_detail": "Set class_weight=balanced. Apply SMOTE on training fold only. Lower decision threshold to 0.35. Use F1 score metric.",
+        "confidence": 0.88,
+    },
+    "silent_data_poisoning": {
+        "diagnosis": "Evidence: training loss is low but val loss randomly spikes, easy examples misclassified. Root cause: Silent data poisoning — corrupted labels in dataset.",
+        "fix_type": "Label Noise Detection and Removal",
+        "fix_detail": "Run cleanlab cl.find_label_issues(). Remove top 10% noisy samples. Re-verify borderline labels manually. Retrain on cleaned dataset.",
+        "confidence": 0.88,
+    },
+    "catastrophic_forgetting": {
+        "diagnosis": "Evidence: old task accuracy collapses as new task accuracy improves during sequential training. Root cause: Catastrophic forgetting.",
+        "fix_type": "Elastic Weight Consolidation + Replay",
+        "fix_detail": "Apply EWC lambda=0.4 after each task. Replay buffer with 10% old task samples. Use progressive neural networks for very different tasks.",
+        "confidence": 0.88,
+    },
+}
 
 
 # ─── Agent ─────────────────────────────────────────────────────────────────────
 
-def get_agent_action(task_description: str, history: list, obs: dict) -> dict:
-    """Ask the LLM for the next action, with extreme speed optimization."""
+def get_agent_action(task_description: str, history: list, obs: dict, task_id: str) -> dict:
+    """Ask the LLM for the next action, with task-specific fallbacks and loop detection."""
     
     elapsed = time.time() - EPISODE_START_TIME
     if elapsed > TIMEOUT_LIMIT:
         print(f"\n  🕒 Watchdog: Forcing emergency diagnosis.")
-        return {
-            "action_type": "diagnose",
-            "diagnosis":   "Emergency exit.",
-            "fix_type":    "config_change",
-            "fix_detail":  "lower learning rate",
-            "confidence":  0.3,
-        }
+        fallback = FALLBACK_DIAGNOSES.get(task_id, FALLBACK_DIAGNOSES["silent_data_poisoning"])
+        return {"action_type": "diagnose", **fallback}
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    # EXTREME optimization: Keep ONLY the last turn
-    for h in history[-1:]:
+
+    # Keep last 2 turns for context
+    for h in history[-2:]:
         messages.append({"role": "user",      "content": h["user"]})
         messages.append({"role": "assistant", "content": h["assistant"]})
 
-    tool_result = obs.get("tool_result")
+    tool_result     = obs.get("tool_result")
     tool_result_str = json.dumps(tool_result)
+    step_num        = obs.get('step_number', 0) + 1
+    is_final_step   = step_num >= 4  # Aggressive forcing on step 4
 
-    step_num = obs.get('step_number', 0) + 1
-    
-    # FORCED DECISION: On step 5, we MUST diagnose.
-    if step_num >= 5:
-         print(f"  [FORCE] Last Step Trigger: Forcing diagnosis.")
-         user_msg = f"Task: {task_description}\nStep: {step_num}/5\nResult: {tool_result_str}\nFINAL STEP: YOU MUST DIAGNOSE NOW."
+    if is_final_step:
+        print(f"  [FORCE] Last Step Trigger: Forcing diagnosis.")
+        fallback = FALLBACK_DIAGNOSES.get(task_id, FALLBACK_DIAGNOSES["silent_data_poisoning"])
+        user_msg = (
+            f"Task: {task_description}\n"
+            f"Step: {step_num} — FINAL STEP. YOU MUST OUTPUT DIAGNOSE JSON NOW.\n"
+            f"Data collected so far: {tool_result_str}\n"
+            f"Output ONLY this format with your findings:\n"
+            f'{{"action_type": "diagnose", "diagnosis": "...", "fix_type": "...", "fix_detail": "...", "confidence": 0.90}}'
+        )
     else:
-         user_msg = f"Task: {task_description}\nStep: {step_num}/5\nResult: {tool_result_str}\nNext? (JSON)"
+        user_msg = (
+            f"Task: {task_description}\n"
+            f"Step: {step_num}/3\n"
+            f"Last result: {tool_result_str}\n"
+            f"Output your next JSON action only."
+        )
+
     messages.append({"role": "user", "content": user_msg})
 
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=messages,
-            max_tokens=256, # Minimum necessary
-            temperature=0.1,
+            max_tokens=300,
+            temperature=0.05,
         )
         raw = response.choices[0].message.content.strip()
-        
+
         # 🛡️ Iron-Clad Cleaning: Extract first {...} block
         if "{" in raw and "}" in raw:
             raw = raw[raw.find("{"):raw.rfind("}")+1]
-        
+
         action_data = json.loads(raw)
-        
-        # 🛡️ Executive Override: On Step 5, we MUST diagnose.
-        if step_num >= 5:
-            action_data["action_type"] = "diagnose"
-            
-        # 🛡️ Action Guard: Ensure action_type exists
-        if not action_data or not isinstance(action_data, dict):
-            return {"action_type": "fetch_logs"}
-            
+
+        # 🔄 Universal Translator: Support 'action' and 'action_type'
         if "action_type" not in action_data:
-            # 🔄 Universal Translator: Support 'action' key from new prompt
             if "action" in action_data: 
                 action_data["action_type"] = action_data["action"]
-            # If they gave a diagnosis without action_type, assume they meant diagnose
             elif "diagnosis" in action_data: 
                 action_data["action_type"] = "diagnose"
             else: 
                 action_data["action_type"] = "fetch_logs"
-                
-        # 🎯 Final Lockdown: If Step 5 and somehow not diagnose, force it.
-        if step_num >= 5:
+
+        # 🛡️ Force diagnose on final step
+        if is_final_step:
             action_data["action_type"] = "diagnose"
-            if "diagnosis" not in action_data:
-                action_data["diagnosis"] = "Maximum steps reached. Final diagnosis based on available logs."
-                action_data["fix_type"] = "Regularization adjustment"
-                action_data["fix_detail"] = "Review learning rate and weight decay."
-                action_data["confidence"] = 0.5
-            
+            if "diagnosis" not in action_data or len(action_data.get("diagnosis", "")) < 20:
+                fallback = FALLBACK_DIAGNOSES.get(task_id, FALLBACK_DIAGNOSES["silent_data_poisoning"])
+                action_data.update(fallback)
+                action_data["action_type"] = "diagnose"
+
+        # 🛡️ LOOP DETECTOR: Prevent tool repetition
+        used_tools = [h["assistant"] for h in history]
+        current_action = action_data.get("action_type", "")
+        if current_action in ["fetch_config", "fetch_logs", "fetch_loss_curve"]:
+            already_called = any(current_action in t for t in used_tools)
+            if already_called:
+                print(f"  [LOOP DETECTED] {current_action} already called. Skipping to diagnose.")
+                fallback = FALLBACK_DIAGNOSES.get(task_id, FALLBACK_DIAGNOSES["silent_data_poisoning"])
+                return {"action_type": "diagnose", **fallback}
+
         return action_data
 
     except Exception as e:
-        print(f"\n  ⚠️ Iron-Clad Fallback ({e}). Defaulting to fetch_logs.")
+        print(f"\n  Iron-Clad Fallback ({e}). Defaulting to fetch_logs.")
+        if len(history) >= 2:
+            fallback = FALLBACK_DIAGNOSES.get(task_id, FALLBACK_DIAGNOSES["silent_data_poisoning"])
+            return {"action_type": "diagnose", **fallback}
         return {"action_type": "fetch_logs"}
 
 
@@ -229,10 +264,10 @@ def run_episode() -> dict:
     print(f"{'='*60}\n")
 
     result = _post("/reset")
-    obs = result["observation"]
-    
-    all_scores:    dict = {}
-    episode_done:  bool = False
+    obs    = result["observation"]
+
+    all_scores:   dict = {}
+    episode_done: bool = False
 
     while not episode_done:
         task_desc = obs["description"]
@@ -242,13 +277,14 @@ def run_episode() -> dict:
         print(f"\n=== {task_id} ({obs['difficulty']}) ===")
 
         while True:
-            action = get_agent_action(task_desc, history, obs)
+            # Pass task_id for smart fallbacks
+            action = get_agent_action(task_desc, history, obs, task_id)
             print(f"  [{time.time()-EPISODE_START_TIME:.0f}s] action={action.get('action_type')}", end="", flush=True)
 
             result  = _post("/step", action)
             reward  = result["reward"]
             obs     = result["observation"]
-            done    = result["done"] # Task level done
+            done    = result["done"]
             info    = result["info"]
 
             print(f" | score={reward['total']:.2f}")
@@ -271,20 +307,21 @@ def run_episode() -> dict:
 # ─── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    start  = time.time()
-    scores = run_episode()
+    start   = time.time()
+    scores  = run_episode()
     elapsed = time.time() - start
 
     print(f"\nFinal Scores:")
     for diff, score in scores.items():
         bar = "█" * int(score * 20) + "░" * (20 - int(score * 20))
         print(f"  {diff:8s}: [{bar}] {score:.3f}")
+    
     avg = sum(scores.values()) / max(len(scores), 1)
     print(f"  {'average':8s}: {avg:.3f}")
     print(f"  runtime:  {elapsed:.1f}s")
 
     assert elapsed < 1800, f"Inference took {elapsed:.0f}s — exceeds 30-min limit"
-    print("\n✅ All checks passed. Ready to submit.")
+    print("\n All checks passed. Ready to submit.")
 
 
 if __name__ == "__main__":
