@@ -156,7 +156,7 @@ def run_episode() -> dict:
         task_id   = obs["task_id"]
         history   = []
 
-        print(f"\n─── {task_id} ({obs['difficulty']}) ───")
+        print(f"\n=== {task_id} ({obs['difficulty']}) ===")
 
         while True:
             action = get_agent_action(task_desc, history, obs)
