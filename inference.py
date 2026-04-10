@@ -175,8 +175,9 @@ def run_episode() -> dict:
                 "assistant": json.dumps(action),
             })
 
-            if action.get("action_type") == "diagnose":
-                all_scores[obs["difficulty"]] = reward["total"]
+            if done:
+                if action.get("action_type") == "diagnose":
+                    all_scores[obs["difficulty"]] = reward["total"]
                 if info.get("episode_done"):
                     episode_done = True
                 break
