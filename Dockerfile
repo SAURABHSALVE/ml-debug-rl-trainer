@@ -12,6 +12,8 @@ COPY . .
 
 # Set PYTHONPATH to ensure 'ml_env' and 'server' are discoverable
 ENV PYTHONPATH=/app
+# Force unbuffered stdout so [START]/[STEP]/[END] lines are visible immediately
+ENV PYTHONUNBUFFERED=1
 
 # HF Space standard port
 EXPOSE 7860
