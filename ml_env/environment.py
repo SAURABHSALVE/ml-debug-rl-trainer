@@ -268,6 +268,7 @@ class MLDebugEnv:
             trajectory_bonus=trajectory_bonus,
             path_bonus=path_bonus,
             total=total,
+            graded=True,
         )
 
         self._action_history.append("diagnose")
@@ -284,9 +285,10 @@ class MLDebugEnv:
             # ✅ Standardized OpenEnv [END] pattern for automated validators
             logger.info(f"[END] Task: {task['task_id']} | Status: Success | Final Score: {total:.2f}")
 
-        done, info, next_obs = self._advance_or_end(reward, difficulty, task)
+        task_done, episode_done, info, next_obs = self._advance_or_end(reward, difficulty, task)
+        info["episode_done"] = episode_done
 
-        return next_obs, reward, done, info
+        return next_obs, reward, task_done, info
 
     # ─── Tool Handlers ─────────────────────────────────────────────────────────
 
@@ -399,29 +401,36 @@ class MLDebugEnv:
             available_tools=AVAILABLE_TOOLS,
         )
 
-    def _advance_or_end(self, reward: Reward, difficulty: str, current_task: Dict) -> Tuple[bool, Dict, Observation]:
+    def _advance_or_end(self, reward: Reward, difficulty: str, current_task: Dict) -> Tuple[bool, bool, Dict, Observation]:
         self._task_index += 1
+        task_done = True # Diagnosis always finishes the current task
+        
         if self._task_index < len(self._tasks):
             logger.info(
                 f"Task {current_task['task_id']} complete. "
                 f"Moving to {self._tasks[self._task_index]['task_id']}"
             )
             next_obs = self._load_task(self._tasks[self._task_index])
-            return False, {
+            return task_done, False, {
                 "task_complete": difficulty,
                 "score": reward.total,
                 "next_task": next_obs.task_id,
             }, next_obs
-        # All 3 tasks done — return final obs from last task
+        
+        # All 3 tasks done
+        episode_done = True
         avg_score = sum(self._scores.values()) / max(len(self._scores), 1)
         logger.info(
             f"Episode complete. Scores: {self._scores}, "
             f"Average: {avg_score:.2f}"
         )
-        final_obs = self._make_obs(
-            current_task,
-            tool_result={"graded": True, "score": reward.total, "episode_complete": True},
-        )
+        return task_done, episode_done, {
+            "task_complete": difficulty,
+            "score": reward.total,
+            "episode_done": True,
+            "scores": self._scores,
+            "average_score": round(avg_score, 3),
+        }, self._last_obs
         return True, {
             "episode_complete": True,
             "scores": self._scores,
