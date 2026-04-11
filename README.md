@@ -1,27 +1,11 @@
 ---
-title: ML Experiment Debugger — OpenEnv
-emoji: 🔬
-colorFrom: indigo
-colorTo: purple
-sdk: docker
-pinned: true
-short_description: "RL env — AI agents diagnose 6 real ML bugs (OpenEnv spec)"
-tags:
-  - reinforcement-learning
-  - openenv
-  - ml-engineering
-  - tool-use
-  - debugging
-  - huggingface
-  - pytorch
-  - hackathon
-  - fastapi
-  - rl-environment
-  - meta-hackathon
-  - llm-grading
-  - reward-shaping
-license: apache-2.0
-app_port: 7860
+title: ML Experiment Debugger
+emoji: 🐞
+colorFrom: red
+colorTo: yellow
+sdk: streamlit
+app_file: app.py
+pinned: false
 ---
 
 # 🔬 ML Experiment Debugger — OpenEnv
