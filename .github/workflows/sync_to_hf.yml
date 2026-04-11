@@ -2,7 +2,6 @@ name: Sync to Hugging Face Hub
 on:
   push:
     branches: [main]
-  # This allows you to run the sync manually from the Actions tab
   workflow_dispatch:
 
 jobs:
@@ -19,10 +18,11 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # 1. Configure git with a dummy identity to avoid errors
           git config --global user.email "sync-bot@example.com"
           git config --global user.name "HF Sync Bot"
-          
-          # 2. Add the HF Space as a remote and push
-          # Using the HF_TOKEN directly in the URL for authentication
-          git push --force https://12-vinit:$HF_TOKEN@huggingface.co/spaces/12-vinit/ml-experiment-debugger main
+
+          # Use 'user:token' format — HF requires your username before the token
+          git remote add hf_space https://12-vinit:${HF_TOKEN}@huggingface.co/spaces/12-vinit/ml-experiment-debugger || \
+          git remote set-url hf_space https://12-vinit:${HF_TOKEN}@huggingface.co/spaces/12-vinit/ml-experiment-debugger
+
+          git push --force hf_space main
