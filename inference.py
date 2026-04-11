@@ -293,19 +293,19 @@ def get_agent_action(
 
     current_task_step = len(history) + 1
 
-    # Per-task optimal investigation sequences (no repeats)
+    # Per-task optimal investigation sequences (no repeats, tool-relevant)
     TASK_STEPS = {
         "data_leakage": [
-            {"action_type": "fetch_config"},
-            {"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 5},
+            {"action_type": "fetch_config", "keys": ["features", "target", "columns", "label", "feature_names"]},
+            {"action_type": "fetch_loss_curve", "split": "val"},
         ],
         "nan_init": [
-            {"action_type": "fetch_config"},
-            {"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 5},
+            {"action_type": "fetch_config", "keys": ["init_std", "lr", "dropout", "weight_init"]},
+            {"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 3},
         ],
         "fp16_underflow": [
             {"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 10},
-            {"action_type": "fetch_config"},
+            {"action_type": "fetch_config", "keys": ["fp16", "mixed_precision", "use_amp", "scaler", "grad_scaler"]},
         ],
         "class_imbalance": [
             {"action_type": "fetch_class_metrics", "class_id": 0},
@@ -314,13 +314,10 @@ def get_agent_action(
         "silent_data_poisoning": [
             {"action_type": "fetch_class_metrics", "class_id": 0},
             {"action_type": "fetch_class_metrics", "class_id": 1},
-            {"action_type": "fetch_class_metrics", "class_id": 2},
-            {"action_type": "fetch_class_metrics", "class_id": 3},
-            {"action_type": "fetch_class_metrics", "class_id": 4},
         ],
         "catastrophic_forgetting": [
             {"action_type": "fetch_logs", "start_epoch": 1, "end_epoch": 10},
-            {"action_type": "fetch_config"},
+            {"action_type": "fetch_config", "keys": ["freeze_backbone", "lr", "weight_decay", "layers_frozen"]},
         ],
     }
 
@@ -350,10 +347,23 @@ def get_agent_action(
             return fallback_steps[step_idx]
         return _build_diagnose(task_id)
 
-    # After 2 successful investigation steps, diagnose immediately
-    # (prevents LLM from adding redundant steps when credits work partially)
+    # Investigation step cap — diagnose after enough evidence gathered
     investigation_count = sum(1 for t in called_tools if t != "diagnose")
     if investigation_count >= 2:
+        # For silent_data_poisoning: keep scanning classes until we find the poisoned one
+        # (max 5 classes total), but stop the moment it's identified
+        if task_id == "silent_data_poisoning":
+            if poisoned_class_id >= 0:
+                _out(f"  [AGENT] Poisoned class_{poisoned_class_id} confirmed — diagnosing now.")
+                return _build_diagnose(task_id)
+            # Find next unscanned class_id (0-4)
+            scanned = {int(t.split("_")[-1]) for t in called_tools if t.startswith("fetch_class_metrics_")}
+            for cid in range(5):
+                if cid not in scanned:
+                    return {"action_type": "fetch_class_metrics", "class_id": cid}
+            # All 5 scanned, none found — diagnose anyway with best guess
+            _out("  [AGENT] All classes scanned, no clear poisoned class — diagnosing.")
+            return _build_diagnose(task_id)
         _out("  [AGENT] 2 investigation steps done — diagnosing now.")
         return _build_diagnose(task_id)
 
@@ -431,18 +441,48 @@ def get_agent_action(
 def _extract_poisoned_class(tool_result: dict) -> int:
     """
     Parse fetch_class_metrics response to find the class with accuracy ~0.35.
+    Handles multiple response shapes from the server.
     Returns class_id if found, else -1.
     """
     if not tool_result:
         return -1
     try:
-        # Result may be a dict with class_id and metrics, or a list of class dicts
-        acc = tool_result.get("accuracy") or tool_result.get("acc")
+        # Shape 1: {"class_id": N, "accuracy": 0.35, ...}
+        acc = (tool_result.get("accuracy") or tool_result.get("acc")
+               or tool_result.get("precision") or tool_result.get("f1"))
         cid = tool_result.get("class_id")
         if acc is not None and cid is not None:
-            acc = float(acc)
-            if acc <= 0.40:  # poisoned class has accuracy stagnated around 0.35
+            if float(acc) <= 0.42:   # poisoned class ≈ 0.35, allow margin
                 return int(cid)
+
+        # Shape 2: {"metrics": {"accuracy": 0.35}, "class_id": N}
+        metrics = tool_result.get("metrics") or tool_result.get("class_metrics") or {}
+        if isinstance(metrics, dict):
+            acc2 = (metrics.get("accuracy") or metrics.get("acc")
+                    or metrics.get("f1") or metrics.get("precision"))
+            cid2 = tool_result.get("class_id") or metrics.get("class_id")
+            if acc2 is not None and cid2 is not None:
+                if float(acc2) <= 0.42:
+                    return int(cid2)
+
+        # Shape 3: list of class entries
+        if isinstance(tool_result, list):
+            for entry in tool_result:
+                a = entry.get("accuracy") or entry.get("acc") or entry.get("f1")
+                c = entry.get("class_id") or entry.get("id")
+                if a is not None and c is not None and float(a) <= 0.42:
+                    return int(c)
+
+        # Shape 4: flat dict with per_class or class_X keys
+        for key, val in tool_result.items():
+            if isinstance(val, dict):
+                a = val.get("accuracy") or val.get("acc") or val.get("f1")
+                if a is not None and float(a) <= 0.42:
+                    # Try to extract class id from key like "class_2" or "2"
+                    import re
+                    m = re.search(r"\d+", str(key))
+                    if m:
+                        return int(m.group())
     except Exception:
         pass
     return -1
