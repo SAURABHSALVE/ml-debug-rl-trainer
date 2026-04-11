@@ -266,11 +266,13 @@ def generate_class_imbalance_task(seed: int = 55) -> Dict[str, Any]:
     rng = random.Random(seed)
     epochs = 20
 
-    # Model learns to always predict majority class → high overall acc, zero minority acc
-    train_loss = _smooth(2.2, 0.18, epochs, noise=0.01, rng=rng)
-    val_loss   = _smooth(2.1, 0.20, epochs, noise=0.015, rng=rng)
-    train_acc  = _smooth(0.40, 0.95, epochs, noise=0.01, rng=rng)
-    val_acc    = _smooth(0.38, 0.93, epochs, noise=0.015, rng=rng)
+    # High overall accuracy while still hiding class imbalance; train/val curves stay aligned to avoid overfitting
+    train_loss = _smooth(1.2, 0.22, epochs, noise=0.01, rng=rng)
+    val_loss   = _smooth(1.25, 0.24, epochs, noise=0.015, rng=rng)
+    train_acc  = _smooth(0.70, 0.96, epochs, noise=0.01, rng=rng)
+    val_acc    = _smooth(0.65, 0.95, epochs, noise=0.015, rng=rng)
+    train_acc[-1] = 0.96
+    val_acc[-1] = 0.95
 
     minority_classes = [1, 2, 3]
     majority_class = 0
@@ -293,6 +295,7 @@ def generate_class_imbalance_task(seed: int = 55) -> Dict[str, Any]:
         "class_weights": None,
         "sampler": "default",
         "loss_function": "CrossEntropyLoss",
+        "weight_decay": 0.0001,
     }
 
     class_dist = {0: 9500, 1: 167, 2: 198, 3: 135}  # Severe imbalance
@@ -308,10 +311,10 @@ def generate_class_imbalance_task(seed: int = 55) -> Dict[str, Any]:
             }
         else:
             class_metrics[c] = {
-                "accuracy": round(rng.uniform(0.01, 0.08), 3),
-                "f1": round(rng.uniform(0.01, 0.06), 3),
+                "accuracy": round(rng.uniform(0.88, 0.94), 3),
+                "f1": round(rng.uniform(0.85, 0.92), 3),
                 "support": class_dist[c],
-                "recall": round(rng.uniform(0.00, 0.05), 3),
+                "recall": round(rng.uniform(0.80, 0.90), 3),
             }
 
     return {
@@ -319,9 +322,9 @@ def generate_class_imbalance_task(seed: int = 55) -> Dict[str, Any]:
         "difficulty": "medium",
         "description": (
             "A MobileNetV2 was trained on a 4-class medical X-ray classification dataset. "
-            "Overall validation accuracy reached 93%, which looks excellent. "
-            "However, clinicians report that the model almost never catches disease in minority cases. "
-            "Investigate the root cause — the top-level metrics may be misleading."
+            "Overall validation accuracy reached 95% with a close train/val gap, which looks excellent. "
+            "However, clinicians report the model still misses disease in minority cases. "
+            "Investigate the root cause — the top-level metrics may be masking class imbalance."
         ),
         "data": {
             "logs": logs,
