@@ -12,8 +12,8 @@ from typing import Any, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
-_SCORE_MIN = 1e-6   # strictly > 0
-_SCORE_MAX = 1 - 1e-6  # strictly < 1
+_SCORE_MIN = 0.0001   # strictly > 0, and :.4f prints as 0.0001 not 0.0000
+_SCORE_MAX = 0.9999   # strictly < 1, and :.4f prints as 0.9999 not 1.0000
 
 def _clamp(score: float) -> float:
     """Clamp score to the open interval (0, 1) as required by the validator."""

@@ -146,7 +146,7 @@ STATIC_TASKS = [
 
 def _emit_fallback_task(task_id: str, diff: str, bug_type: str) -> float:
     score = 0.25  # already strictly between 0 and 1
-    score = max(1e-6, min(1 - 1e-6, score))
+    score = max(0.0001, min(0.9999, score))
     _out(f"[START] task={task_id}")
     _out(f"[STEP] step=1 reward={score:.4f}")
     _out(f"[END] task={task_id} score={score:.4f} steps=1")
@@ -318,7 +318,8 @@ def run_episode() -> dict:
             info   = step_result.get("info", {})
             score  = float(reward.get("total", 0.0))
             # Clamp to open interval (0, 1) — validator requires strictly between 0 and 1
-            score  = max(1e-6, min(1 - 1e-6, score))
+            # Use 0.0001 / 0.9999 so :.4f formatting never rounds to 0.0000 or 1.0000
+            score  = max(0.0001, min(0.9999, score))
 
             _out(f"[STEP] step={task_step} reward={score:.4f}")
 
@@ -338,7 +339,8 @@ def run_episode() -> dict:
                 break
 
         if not task_ended:
-            _out(f"[END] task={task_id} score=0.2500 steps={task_step}")
+            fallback_score = 0.2500
+            _out(f"[END] task={task_id} score={fallback_score:.4f} steps={task_step}")
             episode_done = True
 
     return all_scores
