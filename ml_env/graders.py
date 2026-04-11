@@ -12,6 +12,13 @@ from typing import Any, Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
+_SCORE_MIN = 1e-6   # strictly > 0
+_SCORE_MAX = 1 - 1e-6  # strictly < 1
+
+def _clamp(score: float) -> float:
+    """Clamp score to the open interval (0, 1) as required by the validator."""
+    return max(_SCORE_MIN, min(_SCORE_MAX, round(score, 6)))
+
 
 def _contains_any(text: str, keywords: list) -> bool:
     text_lower = text.lower()
@@ -56,7 +63,7 @@ def grade_data_leakage(action_data: Dict[str, Any], ground_truth: Dict[str, Any]
     else:
         feedback_parts.append("❌ Fix is incorrect or missing")
 
-    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = _clamp(breakdown["diagnosis"] + breakdown["fix"])
     
     return total, breakdown, " | ".join(feedback_parts)
 
@@ -90,7 +97,7 @@ def grade_fp16_underflow(action_data: Dict[str, Any], ground_truth: Dict[str, An
         fix_score += 0.3
 
     breakdown["fix"] = round(fix_score, 3)
-    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = _clamp(breakdown["diagnosis"] + breakdown["fix"])
     
     if breakdown["fix"] >= 0.4:
         feedback_parts.append("✅ Fix is specific and correct (scaler or bf16)")
@@ -163,9 +170,8 @@ def grade_data_poisoning(action_data: Dict[str, Any], ground_truth: Dict[str, An
     else:
         feedback_parts.append("❌ Fix is incorrect or missing")
 
-    total = round(
-        breakdown["bug_type"] + breakdown["class_identified"] + breakdown["fix"],
-        3,
+    total = _clamp(
+        breakdown["bug_type"] + breakdown["class_identified"] + breakdown["fix"]
     )
     return total, breakdown, " | ".join(feedback_parts)
 
@@ -203,7 +209,7 @@ def grade_nan_init(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) ->
     else:
         feedback_parts.append("❌ Fix is incorrect or missing")
 
-    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = _clamp(breakdown["diagnosis"] + breakdown["fix"])
     
     return total, breakdown, " | ".join(feedback_parts)
 
@@ -241,7 +247,7 @@ def grade_class_imbalance(action_data: Dict[str, Any], ground_truth: Dict[str, A
     else:
         feedback_parts.append("❌ Fix is incorrect or missing")
 
-    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = _clamp(breakdown["diagnosis"] + breakdown["fix"])
     
     return total, breakdown, " | ".join(feedback_parts)
 
@@ -279,7 +285,7 @@ def grade_forgetting(action_data: Dict[str, Any], ground_truth: Dict[str, Any]) 
     else:
         feedback_parts.append("❌ Fix is incorrect or missing")
 
-    total = round(breakdown["diagnosis"] + breakdown["fix"], 3)
+    total = _clamp(breakdown["diagnosis"] + breakdown["fix"])
     
     return total, breakdown, " | ".join(feedback_parts)
 
@@ -348,7 +354,7 @@ Respond ONLY with a JSON object: {{"score": 0.0, "reasoning": "brief explanation
             return keyword_score, keyword_breakdown, keyword_feedback
         
         # ✅ Blend scores
-        blended = round(0.6 * llm_score + 0.4 * keyword_score, 3)
+        blended = _clamp(0.6 * llm_score + 0.4 * keyword_score)
         blended_feedback = (
             f"{keyword_feedback} | 🤖 LLM: {llm_score:.2f} ({reasoning[:60]}...)"
         )
@@ -384,7 +390,7 @@ def _parse_llm_response(raw: str) -> Tuple[float | None, str]:
                 score = result.get("score")
                 if isinstance(score, (int, float)):
                     score = float(score)
-                    score = max(0.0, min(1.0, score))
+                    score = _clamp(score)
                     reasoning = result.get("reasoning", "LLM graded")
                     return score, reasoning
         except json.JSONDecodeError:
@@ -398,7 +404,7 @@ def _parse_llm_response(raw: str) -> Tuple[float | None, str]:
                 score = result.get("score")
                 if isinstance(score, (int, float)):
                     score = float(score)
-                    score = max(0.0, min(1.0, score))
+                    score = _clamp(score)
                     reasoning = result.get("reasoning", "LLM graded")
                     return score, reasoning
         except json.JSONDecodeError:
@@ -409,7 +415,7 @@ def _parse_llm_response(raw: str) -> Tuple[float | None, str]:
     if score_match:
         try:
             score = float(score_match.group(1))
-            score = max(0.0, min(1.0, score))
+            score = _clamp(score)
             reasoning = "Extracted from plain text"
             return score, reasoning
         except ValueError:
