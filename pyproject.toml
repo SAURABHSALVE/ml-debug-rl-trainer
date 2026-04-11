@@ -27,6 +27,7 @@ dependencies = [
 [project.scripts]
 server = "server.app:main"
 ml-debug-inference = "inference:main"
+ml-debug = "ml_env.__main__:main"
 
 [project.urls]
 Homepage = "https://huggingface.co/spaces/12-vinit/ml-experiment-debugger"

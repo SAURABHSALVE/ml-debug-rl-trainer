@@ -57,6 +57,42 @@ Unlike "toy" environments, this benchmark forces agents to manage a **global ste
 
 ---
 
+## ♿ Accessibility for different users
+
+### For ML engineers
+- Run a reproducible demo with `python -m ml_env --demo`.
+- After package installation, use the CLI command `ml-debug --demo`.
+- Outputs are JSON-native and expose consistent metrics, logs, observations, and tool history.
+- This makes integration easy for pipelines, evaluation scripts, and tooling frameworks.
+
+### For data scientists
+- Use the notebook at `notebooks/ML_Experiment_Debugger_Demo.ipynb`.
+- The notebook contains sample runs, observation inspection, and visualization guidance.
+- It also includes a short guide on how to add a new task type to the environment.
+
+### For project reviewers / non-technical users
+- The API docs at `/docs` provide clickable run buttons for all endpoints.
+- The root path `/` redirects to `/docs` for immediate interactive exploration.
+- Scenario descriptions and task summaries are written in plain language.
+
+### For hackathon judges
+- Launch the app with one command: `python -m uvicorn server.app:app --host 0.0.0.0 --port 7860`.
+- The project is designed to be easy to run, verify, and review quickly.
+- The README includes a short pitch and a clear checklist for submission readiness.
+
+---
+
+## 📓 How to add a new task
+
+To add a new task:
+1. Create a new task generator in `ml_env/tasks.py`.
+2. Include a realistic description, training logs, config, and ground truth metadata.
+3. Add the task generator function to the `TASK_POOL` in `ml_env/environment.py`.
+4. Implement or reuse a grader in `ml_env/graders.py` to score diagnosis and fix details.
+5. Verify the task by running the CLI demo and the `/docs` API flow.
+
+---
+
 ## 📋 The 6-Bug Catalogue
 
 The environment randomly samples 3 tasks (one from each bracket) to test generalizability across diverse ML domains.
@@ -92,7 +128,16 @@ The reward system incentivizes professional investigative behavior, not just luc
 ### Local Run
 ```bash
 pip install -r requirements.txt
-uvicorn app:app --host 0.0.0.0 --port 7860
+python -m uvicorn server.app:app --host 0.0.0.0 --port 7860
+```
+
+### CLI demo
+```bash
+python -m ml_env --demo
+```
+After package installation, the CLI command is also available as:
+```bash
+ml-debug --demo
 ```
 
 ### Docker
@@ -109,6 +154,21 @@ The environment exposes standard endpoints:
 - `POST /step`: call investigation tools or `diagnose`.
 - `GET /state`: Deep introspection into episode progress.
 - `GET /tasks`: Details on current tasks.
+- `GET /health`: Service health and readiness.
+
+The root path `/` redirects to `/docs`, where reviewers can click through the API with live request buttons.
+
+---
+
+## ✅ Hackathon readiness checklist
+- [x] One-command local launch documented
+- [x] CLI demo available via `python -m ml_env --demo`
+- [x] Consistent JSON output for metrics, logs, and observations
+- [x] Interactive `/docs` API demo for non-technical reviewers
+- [x] Notebook example added for data scientists
+- [x] Clear “how to add a new task” guide included
+- [x] Project summary and judge pitch included
+- [x] Submission-ready README with concise, review-friendly sections
 
 ---
 *Built with ❤️ for the Meta OpenEnv Hackathon 2026*
