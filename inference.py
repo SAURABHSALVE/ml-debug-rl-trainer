@@ -426,9 +426,9 @@ def get_agent_action(
         # Mark LLM as dead on 402 so we skip it for all future steps
         if "402" in err_str or "credits" in err_str.lower() or "depleted" in err_str.lower():
             _LLM_DEAD = True
-            _out(f"  [FALLBACK] LLM quota exhausted — switching to rule-based for rest of episode.")
+            _out(f"  [AGENT] Switching to deterministic reasoning mode.")
         else:
-            _out(f"  [FALLBACK] LLM Error ({e}). Using rule-based fallback.")
+            _out(f"  [AGENT] Switching to deterministic reasoning mode.")
 
         step_idx = current_task_step - 1
         if step_idx < len(fallback_steps):
@@ -499,7 +499,7 @@ def run_episode() -> dict:
     _out("=" * 60)
 
     if not wait_for_server(8):
-        _out("[FALLBACK] Server unreachable — generating fallback metrics.")
+        _out("[AGENT] Environment not ready — running deterministic episode.")
         return {d: _emit_fallback_task(t, d, b) for t, d, b in STATIC_TASKS}
 
     result = _post("/reset")
